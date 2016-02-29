@@ -57,6 +57,32 @@ Supported Methods (CDN)
 
 .. include:: storage/_supported_methods_cdn.rst
 
+Container
+---------
+
+Provider Matrix
+~~~~~~~~~~~~~~~
+
+.. include:: container/_supported_providers.rst
+
+Supported Methods
+~~~~~~~~~~~~~~~~~
+
+.. include:: container/_supported_methods.rst
+
+Backup
+------
+
+Provider Matrix
+~~~~~~~~~~~~~~~
+
+.. include:: backup/_supported_providers.rst
+
+Supported Methods
+~~~~~~~~~~~~~~~~~
+
+.. include:: backup/_supported_methods.rst
+
 DNS
 ---
 
@@ -69,16 +95,3 @@ Supported Methods
 ~~~~~~~~~~~~~~~~~
 
 .. include:: dns/_supported_methods.rst
-
-Backup
----
-
-Provider Matrix
-~~~~~~~~~~~~~~~
-
-.. include:: backup/_supported_providers.rst
-
-Supported Methods
-~~~~~~~~~~~~~~~~~
-
-.. include:: backup/_supported_methods.rst
