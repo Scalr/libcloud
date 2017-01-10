@@ -79,7 +79,8 @@ class LoggingConnection(LibcloudConnection):
                 else:
                     cls = StringIO
 
-                return cls(b(self.s))
+                data = self.s.encode('utf-8') if not PY3 else self.s
+                return cls(b(data))
         rr = r
         headers = lowercase_keys(dict(r.getheaders()))
 
