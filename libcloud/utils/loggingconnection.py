@@ -47,9 +47,6 @@ class LoggingConnection(LibcloudConnection):
     :cvar log: file-like object that logs entries are written to.
     """
 
-    protocol = 'https'
-    port = None
-
     log = None
     http_proxy_used = False
 
@@ -168,8 +165,7 @@ class LoggingConnection(LibcloudConnection):
             cmd.extend(["--data-binary", pquote(body)])
 
         cmd.extend(["--compress"])
-        cmd.extend([pquote("%s://%s:%d%s" % (self.protocol, self.host,
-                                             self.port, url))])
+        cmd.extend([pquote("%s%s" % (self.host, url))])
         return " ".join(cmd)
 
     def getresponse(self):
