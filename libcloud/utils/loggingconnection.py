@@ -180,7 +180,7 @@ class LoggingConnection(LibcloudConnection):
             self.log.flush()
         return r
 
-    def request(self, method, url, body=None, headers=None):
+    def request(self, method, url, body=None, headers=None, **kwargs):
         headers.update({'X-LC-Request-ID': str(id(self))})
         if self.log is not None:
             pre = "# -------- begin %d request ----------\n" % id(self)
