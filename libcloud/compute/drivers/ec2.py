@@ -24,7 +24,6 @@ import copy
 import warnings
 import time
 
-from libcloud.utils.py3 import ET
 from libcloud.utils.py3 import b, basestring, ensure_string
 
 from libcloud.utils.xml import fixxpath, findtext, findattr, findall
@@ -33,6 +32,7 @@ from libcloud.utils.publickey import get_pubkey_comment
 from libcloud.utils.iso8601 import parse_date
 from libcloud.common.aws import AWSBaseResponse, SignedAWSConnection
 from libcloud.common.aws import DEFAULT_SIGNATURE_VERSION
+from libcloud.common.exceptions import RateLimitReachedError
 from libcloud.common.types import (InvalidCredsError, MalformedResponseError,
                                    LibcloudError)
 from libcloud.compute.providers import Provider
@@ -3093,7 +3093,6 @@ class EC2Response(AWSBaseResponse):
         except:
             raise MalformedResponseError("Failed to parse XML",
                                          body=self.body, driver=EC2NodeDriver)
-
         for err in body.findall('Errors/Error'):
             code, message = err.getchildren()
             err_list.append('%s: %s' % (code.text, message.text))
@@ -3107,6 +3106,8 @@ class EC2Response(AWSBaseResponse):
                 raise InvalidCredsError(err_list[-1])
             if code.text == 'IdempotentParameterMismatch':
                 raise IdempotentParamError(err_list[-1])
+            if code.text == 'RequestLimitExceeded':
+                raise RateLimitReachedError(self.status, message.text)
             if code.text == 'InvalidKeyPair.NotFound':
                 # TODO: Use connection context instead
                 match = re.match(r'.*\'(.+?)\'.*', message.text)
@@ -6462,7 +6463,6 @@ class BaseEC2NodeDriver(NodeDriver):
             kwargs['signature_version'] = '4'
         else:
             kwargs['signature_version'] = self.signature_version
-
         return kwargs
 
     def _to_nodes(self, object, xpath):
