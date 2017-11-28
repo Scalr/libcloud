@@ -24,6 +24,7 @@ import copy
 import warnings
 import time
 
+from libcloud.utils.py3 import ET
 from libcloud.utils.py3 import b, basestring, ensure_string
 
 from libcloud.utils.xml import fixxpath, findtext, findattr, findall
