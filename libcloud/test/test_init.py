@@ -41,7 +41,7 @@ class TestUtils(unittest.TestCase):
         if have_paramiko:
             logger = paramiko.util.logging.getLogger()
             paramiko_log_level = logger.getEffectiveLevel()
-            self.assertEqual(paramiko_log_level, logging.NOTSET)
+            self.assertEqual(paramiko_log_level, logging.WARNING)
 
         # Enable debug mode
         os.environ['LIBCLOUD_DEBUG'] = '/dev/null'

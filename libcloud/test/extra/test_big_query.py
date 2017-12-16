@@ -22,9 +22,12 @@ import pytz
 import sys
 import unittest
 
-sys.modules['cryptography.hazmat.backends'] = mock.Mock()
-sys.modules['cryptography.hazmat.primitives'] = mock.Mock()
-sys.modules['cryptography.hazmat.primitives.asymmetric'] = mock.Mock()
+try:
+    import cryptography
+except ImportError:
+    sys.modules['cryptography.hazmat.backends'] = mock.Mock()
+    sys.modules['cryptography.hazmat.primitives'] = mock.Mock()
+    sys.modules['cryptography.hazmat.primitives.asymmetric'] = mock.Mock()
 
 from libcloud.common.google import GoogleAuthType
 from libcloud.extra.drivers.google import BQConnection, BigQuery
