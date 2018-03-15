@@ -158,7 +158,7 @@ class GKEContainerDriver(KubernetesContainerDriver):
         """
         request = "/zones/%s/clusters" % (ex_zone)
         if ex_zone is None:
-            request = "/zones/clusters"
+            request = "/zones/-/clusters"
 
         response = self.connection.request(request, method='GET').object
         return response
@@ -175,5 +175,32 @@ class GKEContainerDriver(KubernetesContainerDriver):
             ex_zone = self.zone
         request = "/zones/%s/serverconfig" % (ex_zone)
 
+        response = self.connection.request(request, method='GET').object
+        return response
+
+    def upgrade_master_version(self, zone, cluster_name, desired_version):
+        """
+        Send request to update master node of the cluster.
+
+        :param zone: Cluster compute zone.
+        :param cluster_name: Cluster name to upgrade.
+        :param desired_version: Version to upgrade master node.
+
+        :return: dict with info about upgrading operation.
+        """
+        request = "/zones/%s/clusters/%s?alt=json" % (zone, cluster_name)
+        data = {"update": {"desiredMasterVersion": desired_version}}
+        response = self.connection.request(request, method='PUT', data=data).object
+        return response
+
+    def get_operation_status(self, zone, operation_id):
+        """
+        Return operation status.
+
+        :param zone: zone name.
+        :param operation_id: unique identifier of the operation.
+        :return: dict with operation status.
+        """
+        request = "/zones/%s/operations/%s" % (zone, operation_id)
         response = self.connection.request(request, method='GET').object
         return response
