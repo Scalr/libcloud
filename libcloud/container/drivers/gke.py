@@ -173,6 +173,10 @@ class GKEContainerDriver(KubernetesContainerDriver):
         """
         if ex_zone is None:
             ex_zone = self.zone
+
+        if not ex_zone:
+            raise ValueError('Cluster compute zone must be provided using "ex_zone" keyword.')
+
         request = "/zones/%s/serverconfig" % (ex_zone, )
 
         response = self.connection.request(request, method='GET').object
@@ -195,6 +199,10 @@ class GKEContainerDriver(KubernetesContainerDriver):
         """
         if ex_zone is None:
             ex_zone = self.zone
+
+        if not ex_zone:
+            raise ValueError('Cluster compute zone must be provided using "ex_zone" keyword.')
+
         request = "/zones/%s/clusters/%s?alt=json" % (ex_zone, cluster_name)
 
         data = {"update": {"desiredMasterVersion": desired_version}}
@@ -214,6 +222,9 @@ class GKEContainerDriver(KubernetesContainerDriver):
         """
         if ex_zone is None:
             ex_zone = self.zone
+
+        if not ex_zone:
+            raise ValueError('Cluster compute zone must be provided using "ex_zone" keyword.')
 
         request = "/zones/%s/operations/%s" % (ex_zone, operation_id)
         response = self.connection.request(request, method='GET').object
