@@ -156,9 +156,9 @@ class GKEContainerDriver(KubernetesContainerDriver):
         :type     ex_zone:  ``str`` or :class:`GCEZone` or
                             :class:`NodeLocation` or ``None``
         """
-        request = "/zones/%s/clusters" % (ex_zone)
         if ex_zone is None:
-            request = "/zones/-/clusters"
+            ex_zone = self.zone or '-'
+        request = "/zones/%s/clusters" % (ex_zone, )
 
         response = self.connection.request(request, method='GET').object
         return response
@@ -173,34 +173,48 @@ class GKEContainerDriver(KubernetesContainerDriver):
         """
         if ex_zone is None:
             ex_zone = self.zone
-        request = "/zones/%s/serverconfig" % (ex_zone)
+        request = "/zones/%s/serverconfig" % (ex_zone, )
 
         response = self.connection.request(request, method='GET').object
         return response
 
-    def upgrade_master_version(self, zone, cluster_name, desired_version):
+    def upgrade_master_version(self, cluster_name, desired_version, ex_zone=None):
         """
         Send request to update master node of the cluster.
 
-        :param zone: Cluster compute zone.
-        :param cluster_name: Cluster name to upgrade.
-        :param desired_version: Version to upgrade master node.
+        :param   cluster_name:    Cluster name to upgrade
+        :type    cluster_name:    ``str``
+        :param   desired_version: Version to upgrade master node.
+        :type    desired_version: ``str``
+        :keyword ex_zone:         Cluster compute zone.
+        :type     ex_zone:  ``str`` or :class:`GCEZone` or
+                            :class:`NodeLocation` or ``None``
 
-        :return: dict with info about upgrading operation.
+        :return: info about upgrading operation.
+        :rtype: dict
         """
-        request = "/zones/%s/clusters/%s?alt=json" % (zone, cluster_name)
+        if ex_zone is None:
+            ex_zone = self.zone
+        request = "/zones/%s/clusters/%s?alt=json" % (ex_zone, cluster_name)
+
         data = {"update": {"desiredMasterVersion": desired_version}}
         response = self.connection.request(request, method='PUT', data=data).object
         return response
 
-    def get_operation_status(self, zone, operation_id):
+    def get_operation_status(self, operation_id, ex_zone=None):
         """
         Return operation status.
 
-        :param zone: zone name.
         :param operation_id: unique identifier of the operation.
-        :return: dict with operation status.
+        :keyword ex_zone:         Cluster compute zone.
+        :type     ex_zone:  ``str`` or :class:`GCEZone` or
+                            :class:`NodeLocation` or ``None``
+        :return: operation status(info).
+        :rtype: dict.
         """
-        request = "/zones/%s/operations/%s" % (zone, operation_id)
+        if ex_zone is None:
+            ex_zone = self.zone
+
+        request = "/zones/%s/operations/%s" % (ex_zone, operation_id)
         response = self.connection.request(request, method='GET').object
         return response
