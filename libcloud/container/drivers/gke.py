@@ -187,11 +187,11 @@ class GKEContainerDriver(KubernetesContainerDriver):
         :param   desired_version: Version to upgrade master node.
         :type    desired_version: ``str``
         :keyword ex_zone:         Cluster compute zone.
-        :type     ex_zone:  ``str`` or :class:`GCEZone` or
+        :type    ex_zone:  ``str`` or :class:`GCEZone` or
                             :class:`NodeLocation` or ``None``
 
         :return: info about upgrading operation.
-        :rtype: dict
+        :rtype:  dict
         """
         if ex_zone is None:
             ex_zone = self.zone
@@ -205,12 +205,12 @@ class GKEContainerDriver(KubernetesContainerDriver):
         """
         Return operation status.
 
-        :param operation_id: unique identifier of the operation.
-        :keyword ex_zone:         Cluster compute zone.
-        :type     ex_zone:  ``str`` or :class:`GCEZone` or
-                            :class:`NodeLocation` or ``None``
-        :return: operation status(info).
-        :rtype: dict.
+        :param    operation_id: unique identifier of the operation.
+        :keyword  ex_zone:      Cluster compute zone.
+        :type     ex_zone:      ``str`` or :class:`GCEZone` or
+                                :class:`NodeLocation` or ``None``
+        :return:  operation status(info).
+        :rtype:   dict.
         """
         if ex_zone is None:
             ex_zone = self.zone
