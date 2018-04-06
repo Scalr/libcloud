@@ -216,7 +216,6 @@ class VSphereNodeDriver(NodeDriver):
             'instance_uuid': summary.config.instanceUuid,
             'path': summary.config.vmPathName,
             'guest_id': summary.config.guestId,
-            'disks': self._get_vm_disks(virtual_machine),
             'template': summary.config.template,
 
             'overall_status': str(summary.overallStatus),
