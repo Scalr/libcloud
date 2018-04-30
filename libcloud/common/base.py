@@ -593,7 +593,8 @@ class Connection(object):
                     url=url,
                     body=data,
                     headers=headers,
-                    stream=stream)
+                    stream=stream,
+                    raw=raw)
                 response = self.rawResponseCls(
                     connection=self,
                     response=self.connection.getresponse())
