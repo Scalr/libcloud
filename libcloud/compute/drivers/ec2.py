@@ -16,7 +16,7 @@
 """
 Amazon EC2, Eucalyptus, Nimbus and Outscale drivers.
 """
-
+import functools
 import os
 import re
 import sys
@@ -78,6 +78,7 @@ __all__ = [
     'EC2RouteTable',
     'EC2Route',
     'EC2SubnetAssociation',
+    'EC2ReservedInstancesOffering',
     'ExEC2AvailabilityZone',
 
     'IdempotentParamError'
@@ -3246,7 +3247,35 @@ class EC2ReservedNode(Node):
                                               driver=driver, extra=extra)
 
     def __repr__(self):
-        return (('<EC2ReservedNode: id=%s>') % (self.id))
+        return '<EC2ReservedNode: id=%s>' % (self.id, )
+
+
+class EC2ReservedInstancesOffering(object):
+    """
+    Class which stores information about EC2 reserved instance offering.
+    Note: This class is EC2 specific.
+    """
+
+    def __init__(self, **properties):
+        self.id = properties.get('id')
+        self.availability_zone = properties.get('availability_zone')
+        self.currency_code = properties.get('currency_code')
+        self.duration = properties.get('duration')
+        self.status = properties.get('status')
+        self.fixed_price = properties.get('fixed_price')
+        self.instance_tenancy = properties.get('instance_tenancy')
+        self.instance_type = properties.get('instance_type')
+        self.is_marketplace = properties.get('is_marketplace')
+        self.offering_class = properties.get('offering_class')
+        self.offering_type = properties.get('offering_type')
+        self.pricing_details = properties.get('pricing_details', [])
+        self.product_description = properties.get('product_description')
+        self.recurring_charges = properties.get('recurring_charges', [])
+        self.scope = properties.get('scope')
+        self.usage_price = properties.get('usage_price')
+
+    def __repr__(self):
+        return '<EC2ReservedInstancesOffering: id=%s>' % (self.id, )
 
 
 class EC2SecurityGroup(object):
@@ -4343,6 +4372,101 @@ class BaseEC2NodeDriver(NodeDriver):
 
         response = self.connection.request(self.path, params=params).object
         return self._get_boolean(response)
+
+    def describe_reserved_instances_offerings(self, ri_params=None, ri_filters=None, ri_ids=None):
+        """Describes Reserved Instance offerings that are available for purchase.
+
+        Details: https://amzn.to/2rsdMA0
+
+        :param ri_params: dict with request parameters. Available keys: ['AvailibilityZone',
+          'IncludeMarketplace', 'InstanceTenancy', 'InstanceType', 'MaxDuration',
+          'MaxInstanceCount', 'MaxResults', 'MinDuration', 'OfferingClass', 'OfferingType',
+          'ProductDescription', 'NextToken'].
+        :type ri_params: dict
+
+        :param ri_filters: dict with request filter. Those values will be translated into Filter.N
+          format. Available keys: ['availability-zone', 'duration', 'fixed-price', 'instance-type',
+          'marketplace', 'product-description', 'reserved-instances-offering-id', 'scope',
+          'usage-price']
+        :type ri_filters: dict
+
+        :param ri_ids: list with reserved instances IDs.
+        :type ri_ids: list
+
+        :return: dict with items as list of ``EC2ReservedInstanceOffering`` and nextToken value.
+            nextToken than can be used to retrieve next page of results.
+        :rtype: dict
+        """
+        req_params = {'Action': 'DescribeReservedInstancesOfferings',
+                      'Version': '2016-11-15'}
+
+        if ri_ids:
+            req_params.update(self._pathlist('ReservedInstancesOfferingId', ri_ids))
+
+        if ri_filters:
+            req_params.update(self._build_filters(ri_filters))
+
+        if ri_params:
+            req_params.update(ri_params)
+
+        response = self.connection.request(self.path, params=req_params).object
+        return {
+            'items': self._to_reserved_instances_offerings(response),
+            'nextToken': findtext(response, xpath='nextToken', namespace=NAMESPACE)
+            }
+
+    def _to_reserved_instances_offerings(self, response):
+        return [self._to_reserved_instance_offering(el) for el in response.findall(
+            fixxpath(xpath='reservedInstancesOfferingsSet/item', namespace=NAMESPACE))
+        ]
+
+    def _to_reserved_instance_offering(self, element):
+        _get_text = functools.partial(findtext, element=element, namespace=NAMESPACE)
+
+        return EC2ReservedInstancesOffering(
+            id=_get_text(xpath='reservedInstancesOfferingId'),
+            availability_zone=_get_text(xpath='availabilityZone'),
+            currency_code=_get_text(xpath='currencyCode'),
+            duration=_get_text(xpath='duration'),
+            status=_get_text(xpath='status'),
+            fixed_price=_get_text(xpath='fixedPrice'),
+            instance_tenancy=_get_text(xpath='instanceTenancy'),
+            instance_type=_get_text(xpath='instanceType'),
+            is_marketplace=_get_text(xpath='marketplace'),
+            offering_class=_get_text(xpath='offeringClass'),
+            offering_type=_get_text(xpath='offeringType'),
+            pricing_details=self._extract_pricing_details_from_ri_offering_element(element),
+            product_description=_get_text(xpath='productDescription'),
+            recurring_charges=self._extract_recurring_charges_from_ri_offering_element(element),
+            scope=_get_text(xpath='scope'),
+            usage_price=_get_text(xpath='usagePrice')
+        )
+
+    def _extract_pricing_details_from_ri_offering_element(self, element):
+        result = []
+        for el in element.findall(fixxpath(xpath='pricingDetailsSet/item', namespace=NAMESPACE)):
+            result.append({
+                'count': findtext(element=el,
+                                  xpath='count',
+                                  namespace=NAMESPACE),
+                'price': findtext(element=el,
+                                  xpath='price',
+                                  namespace=NAMESPACE)
+                })
+        return result
+
+    def _extract_recurring_charges_from_ri_offering_element(self, element):
+        result = []
+        for el in element.findall(fixxpath(xpath='recurringCharges/item', namespace=NAMESPACE)):
+            result.append({
+                'frequency': findtext(element=el,
+                                      xpath='frequency',
+                                      namespace=NAMESPACE),
+                'amount': findtext(element=el,
+                                   xpath='amount',
+                                   namespace=NAMESPACE)
+            })
+        return result
 
     def ex_create_placement_group(self, name):
         """
