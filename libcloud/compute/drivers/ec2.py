@@ -16,7 +16,7 @@
 """
 Amazon EC2, Eucalyptus, Nimbus and Outscale drivers.
 """
-import functools
+
 import os
 import re
 import sys
