@@ -3138,6 +3138,62 @@ VOLUME_MODIFICATION_ATTRIBUTE_MAP = {
     }
 }
 
+RESERVED_INSTANCES_OFFERINGS_MAP = {
+    'id': {
+        'xpath': 'reservedInstancesOfferingId',
+        'transform_func': str
+    },
+    'availability_zone': {
+        'xpath': 'availabilityZone',
+        'transform_func': str
+    },
+    'currency_code': {
+        'xpath': 'currencyCode',
+        'transform_func': str
+    },
+    'duration': {
+        'xpath': 'duration',
+        'transform_func': int
+    },
+    'fixed_price': {
+        'xpath': 'fixedPrice',
+        'transform_func': float
+    },
+    'instance_tenancy': {
+        'xpath': 'instanceTenancy',
+        'transform_func': str
+    },
+    'instance_type': {
+        'xpath': 'instanceType',
+        'transform_func': str
+    },
+    'marketplace': {
+        'xpath': 'marketplace',
+        'transform_func': lambda x: x == 'true'
+    },
+    'offering_class': {
+        'xpath': 'offeringClass',
+        'transform_func': str
+    },
+    'offering_type': {
+        'xpath': 'offeringType',
+        'transform_func': str
+    },
+    'product_description': {
+        'xpath': 'productDescription',
+        'transform_func': str
+    },
+    'scope': {
+        'xpath': 'scope',
+        'transform_func': str
+    },
+    'usage_price': {
+        'xpath': 'usagePrice',
+        'transform_func': float
+    }
+ }
+
+
 VALID_EC2_REGIONS = REGION_DETAILS.keys()
 VALID_EC2_REGIONS = [r for r in VALID_EC2_REGIONS if r != 'nimbus']
 VALID_VOLUME_TYPES = ['standard', 'io1', 'gp2', 'st1', 'sc1']
@@ -3261,14 +3317,12 @@ class EC2ReservedInstancesOffering(object):
         self.availability_zone = properties.get('availability_zone')
         self.currency_code = properties.get('currency_code')
         self.duration = properties.get('duration')
-        self.status = properties.get('status')
         self.fixed_price = properties.get('fixed_price')
         self.instance_tenancy = properties.get('instance_tenancy')
         self.instance_type = properties.get('instance_type')
-        self.is_marketplace = properties.get('is_marketplace')
+        self.marketplace = properties.get('marketplace')
         self.offering_class = properties.get('offering_class')
         self.offering_type = properties.get('offering_type')
-        self.pricing_details = properties.get('pricing_details', [])
         self.product_description = properties.get('product_description')
         self.recurring_charges = properties.get('recurring_charges', [])
         self.scope = properties.get('scope')
@@ -4373,46 +4427,45 @@ class BaseEC2NodeDriver(NodeDriver):
         response = self.connection.request(self.path, params=params).object
         return self._get_boolean(response)
 
-    def describe_reserved_instances_offerings(self, ri_params=None, ri_filters=None, ri_ids=None):
+    def ex_describe_reserved_instances_offerings(self, params=None, filters=None, ids=None):
         """Describes Reserved Instance offerings that are available for purchase.
 
         Details: https://amzn.to/2rsdMA0
 
-        :param ri_params: dict with request parameters. Available keys: ['AvailibilityZone',
+        :param params: dict with request parameters. Available keys: ['AvailibilityZone',
           'IncludeMarketplace', 'InstanceTenancy', 'InstanceType', 'MaxDuration',
           'MaxInstanceCount', 'MaxResults', 'MinDuration', 'OfferingClass', 'OfferingType',
           'ProductDescription', 'NextToken'].
-        :type ri_params: dict
+        :type params: dict
 
-        :param ri_filters: dict with request filter. Those values will be translated into Filter.N
+        :param filters: dict with request filter. Those values will be translated into Filter.N
           format. Available keys: ['availability-zone', 'duration', 'fixed-price', 'instance-type',
           'marketplace', 'product-description', 'reserved-instances-offering-id', 'scope',
           'usage-price']
-        :type ri_filters: dict
+        :type filters: dict
 
-        :param ri_ids: list with reserved instances IDs.
-        :type ri_ids: list
+        :param ids: list with reserved instances IDs.
+        :type ids: list
 
         :return: dict with items as list of ``EC2ReservedInstanceOffering`` and nextToken value.
             nextToken than can be used to retrieve next page of results.
         :rtype: dict
         """
-        req_params = {'Action': 'DescribeReservedInstancesOfferings',
-                      'Version': '2016-11-15'}
+        req_params = {'Action': 'DescribeReservedInstancesOfferings'}
 
-        if ri_ids:
-            req_params.update(self._pathlist('ReservedInstancesOfferingId', ri_ids))
+        if ids:
+            req_params.update(self._pathlist('ReservedInstancesOfferingId', ids))
 
-        if ri_filters:
-            req_params.update(self._build_filters(ri_filters))
+        if filters:
+            req_params.update(self._build_filters(filters))
 
-        if ri_params:
-            req_params.update(ri_params)
+        if params:
+            req_params.update(params)
 
         response = self.connection.request(self.path, params=req_params).object
         return {
             'items': self._to_reserved_instances_offerings(response),
-            'nextToken': findtext(response, xpath='nextToken', namespace=NAMESPACE)
+            'next_token': findtext(response, xpath='nextToken', namespace=NAMESPACE)
             }
 
     def _to_reserved_instances_offerings(self, response):
@@ -4421,52 +4474,19 @@ class BaseEC2NodeDriver(NodeDriver):
         ]
 
     def _to_reserved_instance_offering(self, element):
-        _get_text = functools.partial(findtext, element=element, namespace=NAMESPACE)
+        params = self._get_extra_dict(element, RESERVED_INSTANCES_OFFERINGS_MAP)
 
-        return EC2ReservedInstancesOffering(
-            id=_get_text(xpath='reservedInstancesOfferingId'),
-            availability_zone=_get_text(xpath='availabilityZone'),
-            currency_code=_get_text(xpath='currencyCode'),
-            duration=_get_text(xpath='duration'),
-            status=_get_text(xpath='status'),
-            fixed_price=_get_text(xpath='fixedPrice'),
-            instance_tenancy=_get_text(xpath='instanceTenancy'),
-            instance_type=_get_text(xpath='instanceType'),
-            is_marketplace=_get_text(xpath='marketplace'),
-            offering_class=_get_text(xpath='offeringClass'),
-            offering_type=_get_text(xpath='offeringType'),
-            pricing_details=self._extract_pricing_details_from_ri_offering_element(element),
-            product_description=_get_text(xpath='productDescription'),
-            recurring_charges=self._extract_recurring_charges_from_ri_offering_element(element),
-            scope=_get_text(xpath='scope'),
-            usage_price=_get_text(xpath='usagePrice')
-        )
-
-    def _extract_pricing_details_from_ri_offering_element(self, element):
-        result = []
-        for el in element.findall(fixxpath(xpath='pricingDetailsSet/item', namespace=NAMESPACE)):
-            result.append({
-                'count': findtext(element=el,
-                                  xpath='count',
-                                  namespace=NAMESPACE),
-                'price': findtext(element=el,
-                                  xpath='price',
-                                  namespace=NAMESPACE)
-                })
-        return result
-
-    def _extract_recurring_charges_from_ri_offering_element(self, element):
-        result = []
+        recurring_charges = []
         for el in element.findall(fixxpath(xpath='recurringCharges/item', namespace=NAMESPACE)):
-            result.append({
-                'frequency': findtext(element=el,
-                                      xpath='frequency',
-                                      namespace=NAMESPACE),
-                'amount': findtext(element=el,
-                                   xpath='amount',
-                                   namespace=NAMESPACE)
-            })
-        return result
+            recurring_charges.append({'frequency': findtext(element=el,
+                                                            xpath='frequency',
+                                                            namespace=NAMESPACE),
+                                      'amount': findtext(element=el,
+                                                         xpath='amount',
+                                                         namespace=NAMESPACE)
+                                      })
+        params['recurring_charges'] = recurring_charges
+        return EC2ReservedInstancesOffering(**params)
 
     def ex_create_placement_group(self, name):
         """
