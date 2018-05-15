@@ -2973,6 +2973,18 @@ RESOURCE_EXTRA_ATTRIBUTES_MAP = {
         'offering_type': {
             'xpath': 'offeringType',
             'transform_func': str
+        },
+        'offering_class': {
+            'xpath': 'offeringClass',
+            'transform_func': str
+        },
+        'scope': {
+            'xpath': 'scope',
+            'transform_func': str
+        },
+        'state': {
+            'xpath': 'state',
+            'transform_func': str
         }
     },
     'security_group': {
@@ -4444,7 +4456,7 @@ class BaseEC2NodeDriver(NodeDriver):
           'usage-price']
         :type filters: dict
 
-        :param ids: list with reserved instances IDs.
+        :param ids: list with reserved instances offerings IDs.
         :type ids: list
 
         :return: dict with items as list of ``EC2ReservedInstanceOffering`` and nextToken value.
@@ -5993,7 +6005,7 @@ class BaseEC2NodeDriver(NodeDriver):
                 'timestamp': timestamp,
                 'output': output}
 
-    def ex_list_reserved_nodes(self):
+    def ex_list_reserved_nodes(self, params=None, filters=None, ids=None):
         """
         Lists all reserved instances/nodes which can be purchased from Amazon
         for one or three year terms. Reservations are made at a region level
@@ -6001,11 +6013,34 @@ class BaseEC2NodeDriver(NodeDriver):
 
         More information can be found at http://goo.gl/ulXCC7.
 
-        :rtype: ``list`` of :class:`.EC2ReservedNode`
-        """
-        params = {'Action': 'DescribeReservedInstances'}
+        :param params: dict with request parameters. Available keys: ['OfferingClass',
+            'OfferingType', 'DryRun'].
+        :type params: dict
 
-        response = self.connection.request(self.path, params=params).object
+        :param filters: dict with request filter. Those values will be translated into Filter.N
+          format. Available keys: ['availability-zone', 'duration', 'end', 'fixed-price',
+          'instance-type', 'scope', 'product-description', 'reserved-instances-id', 'start',
+          'state', 'tag:key=value', 'tag-key', 'tag-value', 'usage-price']
+        :type filters: dict
+
+        :param ids: list with reserved instances IDs.
+        :type ids: list
+
+        :return: list of ``EC2ReservedNode`` objects.
+        :rtype: list
+        """
+        req_params = {'Action': 'DescribeReservedInstances'}
+
+        if ids:
+            req_params.update(self._pathlist('ReservedInstancesId', ids))
+
+        if filters:
+            req_params.update(self._build_filters(filters))
+
+        if params:
+            req_params.update(params)
+
+        response = self.connection.request(self.path, params=req_params).object
 
         return self._to_reserved_nodes(response, 'reservedInstancesSet/item')
 
