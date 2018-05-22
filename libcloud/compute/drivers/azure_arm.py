@@ -21,9 +21,10 @@ http://azure.microsoft.com/en-us/services/virtual-machines/
 
 import base64
 import binascii
-import uuid
 import os
 import time
+
+import six
 
 from libcloud.common.azure_arm import AzureResourceManagementConnection
 from libcloud.compute.providers import Provider
@@ -1277,8 +1278,8 @@ class AzureNodeDriver(NodeDriver):
             },
         )
 
-    def ex_get_ratecard(self, offer_durable_id, currency='USD',
-                        locale='en-US', region='US'):
+    def ex_get_rate_card(self, offer_durable_id, currency='USD',
+                         locale='en-US', region='US', api_version='2015-06-01-preview'):
         """
         Get rate card
 
@@ -1294,15 +1295,18 @@ class AzureNodeDriver(NodeDriver):
         :type locale: ``str``
 
         :param region: Region (two-letter code) (default: "US")
-        :type regions: ``str``
+        :type region: ``str``
 
-        :return: A dictionary of rates whose ID's correspond to nothing at all
+        :param api_version: API version
+        :type api_version: ``str``
+
+        :return: A dictionary of rates
         :rtype: ``dict``
         """
 
         action = "/subscriptions/%s/providers/Microsoft.Commerce/" \
                  "RateCard" % (self.subscription_id,)
-        params = {"api-version": "2016-08-31-preview",
+        params = {"api-version": api_version,
                   "$filter": "OfferDurableId eq 'MS-AZR-%s' and "
                              "Currency eq '%s' and "
                              "Locale eq '%s' and "
@@ -1310,6 +1314,48 @@ class AzureNodeDriver(NodeDriver):
                              (offer_durable_id, currency, locale, region)}
         r = self.connection.request(action, params=params)
         return r.object
+
+    def ex_get_usages(self, dtime_from, dtime_to, resolution='Hourly',
+                      usage_api_version='2015-06-01-preview'):
+        """Get usage aggregate data for provided period.
+
+        :param dtime_from: billing period start time
+        :type dtime_from: datetime.datetime
+
+        :param dtime_to: billing period end time
+        :type dtime_to: datetime.datetime
+
+        :param resolution: 'Hourly' or 'Daily' aggregation results
+        :type resolution: str
+
+        :param usage_api_version: Usage API version
+        :type usage_api_version: str
+
+        :return: 1000 usage records (Azure API limit, not configurable)
+        :rtype: typing.Iterator[typing.List[typing.Dict]]
+        """
+
+        params = {
+            'aggregationGranularity': resolution,
+            'api-version': usage_api_version,
+            'reportedEndTime': dtime_to.strftime('%Y-%m-%dT%H:%M:%S+00:00'),
+            'reportedStartTime': dtime_from.strftime('%Y-%m-%dT%H:%S:%M+00:00'),
+            'showDetails': 'true',
+        }
+        action = '/subscriptions/%s/providers/Microsoft.Commerce/' \
+                 'UsageAggregates' % self.subscription_id
+
+        while True:
+            r = self.connection.request(action, params=params)
+
+            yield r.object['value']
+
+            next_link = r.object.get('nextLink')
+            if not next_link:
+                break
+
+            token = six.moves.urllib.parse.parse_qs(next_link).get('continuationToken')
+            params['continuationToken'] = token
 
     def ex_list_publishers(self, location=None):
         """

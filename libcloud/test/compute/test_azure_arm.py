@@ -91,8 +91,8 @@ class AzureNodeDriverTests(LibcloudTestCase):
                           "Standard_A1",
                           "Standard_A2"])
 
-    def test_ex_get_ratecard(self):
-        ratecard = self.driver.ex_get_ratecard('0026P')
+    def test_ex_get_rate_card(self):
+        ratecard = self.driver.ex_get_rate_card('0026P')
         self.assertEqual(set(ratecard.keys()),
                          set(['Currency',
                               'Locale',
