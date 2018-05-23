@@ -1353,7 +1353,7 @@ class AzureNodeDriver(NodeDriver):
         while True:
             r = self.connection.request(action, params=params)
 
-            yield r.object['value']
+            yield r.object
 
             next_link = r.object.get('nextLink')
             if not next_link:
