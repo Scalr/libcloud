@@ -1315,18 +1315,23 @@ class AzureNodeDriver(NodeDriver):
         r = self.connection.request(action, params=params)
         return r.object
 
-    def ex_get_usages(self, dtime_from, dtime_to, resolution='Hourly',
-                      usage_api_version='2015-06-01-preview'):
+    def ex_iterate_usage_aggregates(self, reported_start_time, reported_end_time,
+                                    resolution='Hourly', show_details=True,
+                                    usage_api_version='2015-06-01-preview'):
+
         """Get usage aggregate data for provided period.
 
-        :param dtime_from: billing period start time
-        :type dtime_from: datetime.datetime
+        :param reported_start_time: billing period start time
+        :type reported_start_time: datetime.datetime
 
-        :param dtime_to: billing period end time
-        :type dtime_to: datetime.datetime
+        :param reported_end_time: billing period end time
+        :type reported_end_time: datetime.datetime
 
         :param resolution: 'Hourly' or 'Daily' aggregation results
         :type resolution: str
+
+        :param show_details: instance-level details with the usage data
+        :type show_details: bool
 
         :param usage_api_version: Usage API version
         :type usage_api_version: str
@@ -1338,9 +1343,9 @@ class AzureNodeDriver(NodeDriver):
         params = {
             'aggregationGranularity': resolution,
             'api-version': usage_api_version,
-            'reportedEndTime': dtime_to.strftime('%Y-%m-%dT%H:%M:%S+00:00'),
-            'reportedStartTime': dtime_from.strftime('%Y-%m-%dT%H:%S:%M+00:00'),
-            'showDetails': 'true',
+            'reportedStartTime': reported_start_time.strftime('%Y-%m-%dT%H:%S:%M+00:00'),
+            'reportedEndTime': reported_end_time.strftime('%Y-%m-%dT%H:%M:%S+00:00'),
+            'showDetails': 'true' if show_details else 'false',
         }
         action = '/subscriptions/%s/providers/Microsoft.Commerce/' \
                  'UsageAggregates' % self.subscription_id
