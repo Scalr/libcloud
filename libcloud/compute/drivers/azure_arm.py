@@ -1343,7 +1343,7 @@ class AzureNodeDriver(NodeDriver):
         params = {
             'aggregationGranularity': resolution,
             'api-version': usage_api_version,
-            'reportedStartTime': reported_start_time.strftime('%Y-%m-%dT%H:%S:%M+00:00'),
+            'reportedStartTime': reported_start_time.strftime('%Y-%m-%dT%H:%M:%S+00:00'),
             'reportedEndTime': reported_end_time.strftime('%Y-%m-%dT%H:%M:%S+00:00'),
             'showDetails': 'true' if show_details else 'false',
         }
