@@ -1337,7 +1337,7 @@ class AzureNodeDriver(NodeDriver):
         :type usage_api_version: str
 
         :return: 1000 usage records (Azure API limit, not configurable)
-        :rtype: typing.Iterator[typing.List[typing.Dict]]
+        :rtype: typing.Iterator[typing.Dict]
         """
 
         params = {
