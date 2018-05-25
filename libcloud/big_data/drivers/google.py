@@ -2,8 +2,7 @@
 Module for Google Big Data Drivers.
 """
 from libcloud.big_data.drivers.google_bq_utils import QueryJob
-from libcloud.common.google import GoogleOAuth2Credential, GoogleAuthType,\
-                                   ResourceNotFoundError, GoogleResponse, GoogleBaseConnection
+from libcloud.common.google import GoogleAuthType, ResourceNotFoundError, GoogleResponse, GoogleBaseConnection
 from libcloud.common.base import BaseDriver
 
 API_VERSION = 'v2'
