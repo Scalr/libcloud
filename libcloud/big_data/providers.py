@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from libcloud.extra.types import Provider
+from libcloud.big_data.types import Provider
 from libcloud.common.providers import get_driver as _get_provider_driver
 from libcloud.common.providers import set_driver as _set_provider_driver
 
@@ -24,8 +24,9 @@ __all__ = [
 ]
 
 DRIVERS = {
-    Provider.GOOGLE_BQ: ('libcloud.extra.drivers.google', 'GoogleBQ'),
-    Provider.GOOGLE_BQ_BILLING: ('libcloud.extra.drivers.google', 'GoogleBQBilling')
+    Provider.GOOGLE_BQ: ('libcloud.big_data.drivers.google', 'BigQuery'),
+    Provider.GOOGLE_BQ_BILLING: ('libcloud.big_data.drivers.google', 'BigQueryBilling')
+
 }
 
 
