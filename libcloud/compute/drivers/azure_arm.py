@@ -1359,8 +1359,8 @@ class AzureNodeDriver(NodeDriver):
             if not next_link:
                 break
 
-            token = six.moves.urllib.parse.parse_qs(next_link).get('continuationToken')
-            params['continuationToken'] = token
+            parsed_url = six.moves.urllib.parse.urlparse(next_link)
+            params = six.moves.urllib.parse.parse_qs(parsed_url.query)
 
     def ex_list_publishers(self, location=None):
         """
