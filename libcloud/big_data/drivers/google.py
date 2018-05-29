@@ -2,14 +2,10 @@
 Module for Google Big Data Drivers.
 """
 from libcloud.big_data.drivers.google_bq_utils import QueryJob
-from libcloud.common.google import GoogleAuthType, ResourceNotFoundError, GoogleResponse, GoogleBaseConnection
+from libcloud.common.google import GoogleAuthType, GoogleResponse, GoogleBaseConnection
 from libcloud.common.base import BaseDriver
 
 API_VERSION = 'v2'
-
-
-class BQBillingExcepton(Exception):
-    pass
 
 
 class BQConnection(GoogleBaseConnection):
@@ -139,32 +135,3 @@ class BigQuery(BaseDriver):
             request = '/queries' + query_job.job_id
             response = self.connection.request(request, method='GET', params=data).object
             query_job = QueryJob(response)
-
-
-class BigQueryBilling(BigQuery):
-    """ Google Big Query client with business logic for billing """
-
-    billing_table_prefix = 'gcp_billing_export_v1_'
-    billing_dataset_name = 'billing'
-
-    def _get_billing_table(self):
-
-        try:
-            for table in self.list_tables(self.billing_dataset_name):
-                if table['tableId'].startswith(self.billing_table_prefix):
-                    return table['tableId']
-        except ResourceNotFoundError:
-            raise BQBillingExcepton('Project has not billing dataset')
-
-        raise BQBillingExcepton('Project has not billing table')
-
-    _billing_table_name = None
-
-    @property
-    def billing_table_name(self):
-        """ Use this value in FROM clause of query """
-
-        if not self._billing_table_name:
-            self._billing_table_name = '{}.{}'.format(self.billing_dataset_name, self._get_billing_table())
-
-        return self._billing_table_name
