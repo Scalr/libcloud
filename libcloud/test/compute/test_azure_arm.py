@@ -12,11 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.import libcloud
-import json
-import sys
-import functools
-from datetime import datetime
-
 
 import json
 import sys
@@ -99,6 +94,24 @@ class AzureNodeDriverTests(LibcloudTestCase):
                               'IsTaxIncluded',
                               'OfferTerms',
                               'Meters']))
+
+    def test_ex_iterate_usage_aggregates(self):
+        dtime_from = datetime(year=2018, month=5, day=1, hour=0)
+        dtime_to = datetime(year=2018, month=5, day=5, hour=23)
+
+        usages_gen = self.driver.ex_iterate_usage_aggregates(reported_start_time=dtime_from,
+                                                             reported_end_time=dtime_to)
+        iterations = 2
+        usages_responses = [next(usages_gen) for _ in range(iterations)]
+
+        self.assertEqual(len(usages_responses), 2)
+        for response in usages_responses:
+            self.assertTrue('value' in response)
+            usages_list = response['value']
+            self.assertEqual(len(usages_list), 11)
+            usage = usages_list[0]
+            self.assertEqual(set(usage.keys()),
+                             set(['id', 'name', 'type', 'properties']))
 
     def test_create_node(self):
         location = NodeLocation('any_location', '', '', self.driver)
