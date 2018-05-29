@@ -3339,6 +3339,7 @@ class EC2ReservedInstancesOffering(object):
         self.recurring_charges = properties.get('recurring_charges', [])
         self.scope = properties.get('scope')
         self.usage_price = properties.get('usage_price')
+        self.region = properties.get('region')
 
     def __repr__(self):
         return '<EC2ReservedInstancesOffering: id=%s>' % (self.id, )
@@ -4444,7 +4445,7 @@ class BaseEC2NodeDriver(NodeDriver):
 
         Details: https://amzn.to/2rsdMA0
 
-        :param params: dict with request parameters. Available keys: ['AvailibilityZone',
+        :param params: dict with request parameters. Available keys: ['AvailabilityZone',
           'IncludeMarketplace', 'InstanceTenancy', 'InstanceType', 'MaxDuration',
           'MaxInstanceCount', 'MaxResults', 'MinDuration', 'OfferingClass', 'OfferingType',
           'ProductDescription', 'NextToken'].
@@ -4498,6 +4499,8 @@ class BaseEC2NodeDriver(NodeDriver):
                                                          namespace=NAMESPACE)
                                       })
         params['recurring_charges'] = recurring_charges
+        params['region'] = self.region
+
         return EC2ReservedInstancesOffering(**params)
 
     def ex_create_placement_group(self, name):
