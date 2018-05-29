@@ -762,7 +762,6 @@ class GoogleBaseConnection(ConnectionUserAndKey, PollingConnection):
         :type     scopes: ``list``
         """
         super(GoogleBaseConnection, self).__init__(user_id, key, **kwargs)
-
         self.oauth2_credential = GoogleOAuth2Credential(
             user_id, key, auth_type, credential_file, scopes, **kwargs)
 
