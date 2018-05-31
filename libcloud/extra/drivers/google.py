@@ -1,7 +1,7 @@
 """
 Module for Google Big Data Drivers.
 """
-from libcloud.big_data.drivers.google_bq_utils import QueryJob
+from libcloud.extra.drivers.google_bq_utils import QueryJob
 from libcloud.common.google import GoogleAuthType, GoogleResponse, GoogleBaseConnection
 from libcloud.common.base import BaseDriver
 
