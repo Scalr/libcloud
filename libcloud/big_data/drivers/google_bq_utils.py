@@ -241,24 +241,43 @@ _CELLDATA_FROM_JSON = {
     'RECORD': _record_from_json,
 }
 
+
 class SchemaField:
     """Class represent single field in schema"""
 
-    def __init__(self, raw):
-        self.name = raw['name']
-        self.field_type = raw['type']
-        self.mode = raw.get('mode', 'NULLABLE')
-        self.description = raw.get('description')
+    def __init__(self, name, field_type, mode='NULLABLE',
+                 description=None, fields=()):
+        self.name = name
+        self.field_type = field_type
+        self.mode = mode
+        self.description = description
+
+        self.fields = tuple(fields)
+
+    @classmethod
+    def from_api_repr(cls, api_repr):
+        # Handle optional properties with default values
+        mode = api_repr.get('mode', 'NULLABLE')
+        description = api_repr.get('description')
+        fields = api_repr.get('fields', ())
+        return cls(
+            field_type=api_repr['type'].upper(),
+            fields=[cls.from_api_repr(f) for f in fields],
+            mode=mode.upper(),
+            description=description,
+            name=api_repr['name'])
 
 
 class Schema:
     """
     Build schema from query_job response
     """
-    def __init__(self, schema_section):
+    def __init__(self, api_respose):
         self.schema = []
-        for field in schema_section['fields']:
-            self.schema.append(SchemaField(field))
+
+        for field in api_respose['schema']['fields']:
+            self.schema.append(SchemaField.from_api_repr(field))
+
 
 class QueryJob:
     """
@@ -268,14 +287,13 @@ class QueryJob:
     def __init__(self, response):
         self.job_id = response['jobReference']['jobId']
         self.page_token = response.get('pageToken')
-        self.schema = Schema(response['schema']).schema
-        self.rows = self.rows_builder(response['rows'])
+        self.schema = Schema(response).schema
 
+        self.rows = self.rows_builder(response['rows'])
 
     def rows_builder(self, values):
         """Convert JSON row data to rows with appropriate types."""
         return [self._row_dict_from_json(row) for row in values]
-
 
     def _row_dict_from_json(self, row):
         """Convert single row data to row with appropriate types.

@@ -132,6 +132,8 @@ class BigQuery(BaseDriver):
                 'pageToken': query_job.page_token,
                 'timeoutMs': timeout_ms
             }
-            request = '/queries' + query_job.job_id
+            request = '/queries/' + query_job.job_id
+
             response = self.connection.request(request, method='GET', params=data).object
+
             query_job = QueryJob(response)
