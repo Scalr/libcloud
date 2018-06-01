@@ -1,8 +1,24 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
 """
 Module for Google Big Data Drivers.
 """
 from libcloud.extra.drivers.google_bq_utils import QueryJob
-from libcloud.common.google import GoogleAuthType, GoogleResponse, GoogleBaseConnection
+from libcloud.common.google import GoogleAuthType, GoogleBaseConnection
 from libcloud.common.base import BaseDriver
 
 API_VERSION = 'v2'
@@ -13,12 +29,10 @@ class BQConnection(GoogleBaseConnection):
     Connection class for the BQ driver.
     """
 
-    host = 'www.googleapis.com'
-    responseCls = GoogleResponse
-
     def __init__(self, user_id, key, secure=None, auth_type=None, credential_file=None, **kwargs):
 
         project = kwargs.pop('project')
+
         super(BQConnection, self).__init__(user_id, key, secure=secure, auth_type=auth_type,
                                            credential_file=credential_file, **kwargs)
         self.request_path = '/bigquery/%s/projects/%s' % (API_VERSION, project)
@@ -81,11 +95,24 @@ class BigQuery(BaseDriver):
         return res
 
     def list_datasets(self):
+        """
+        Get list of datasets
+        Api reference: https://cloud.google.com/bigquery/docs/reference/rest/v2/datasets/list
+
+        :return: list of dicts. Each dict contains two keys 'datasetId' and 'projectId'
+        """
         request = '/datasets'
         response = self.connection.request(request, method='GET').object
         return [l['datasetReference'] for l in response['datasets']]
 
     def list_tables(self, dataset_id):
+        """
+        Get list of tables for dataset
+        Api reference: https://cloud.google.com/bigquery/docs/reference/rest/v2/tables/list
+
+        :param dataset_id: str. Id of dataset.
+        :return: list of dicts. Each dict contains next keys 'datasetId', 'projectId' and 'tableId'
+        """
         request = '/datasets/%s/tables' % dataset_id
         response = self.connection.request(request, method='GET').object
         return [l['tableReference'] for l in response['tables']]
@@ -93,6 +120,8 @@ class BigQuery(BaseDriver):
     def query(self, query, max_results=50000, timeout_ms=60000, use_legacy_sql=False):
         """
         Execute query and return result. Result will be chunked.
+
+        Reference: https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/query
 
         :param query: str. BQ query. Example: SELECT * FROM {billing_table} LIMIT 1
         :param max_results: int. Page size
@@ -113,6 +142,8 @@ class BigQuery(BaseDriver):
     def _get_job_results(self, query_job, max_results, timeout_ms):
         """
         Deal with paginated QueryJob results
+
+        Reference: https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/getQueryResults
 
         :param query_job: query job object
 

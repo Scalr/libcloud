@@ -1,60 +1,33 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+
+"""
+Module with support utils for Google Big Data Driver.
+"""
 import datetime
 import base64
 import decimal
-import calendar
-import six
 
 from pytz import UTC
 
 
-DEFAULT_TASK_COMPLETION_TIMEOUT = 180
 _RFC3339_MICROS_NO_ZULU = '%Y-%m-%dT%H:%M:%S.%f'
 _RFC3339_NO_FRACTION = '%Y-%m-%dT%H:%M:%S'
+_YEAR_MONTH_DAY = '%Y-%m-%d'
 _EPOCH = datetime.datetime.utcfromtimestamp(0).replace(tzinfo=UTC)
-
-
-def _millis_from_datetime(value):
-    """Convert non-none datetime to timestamp, assuming UTC.
-
-    :type value: :class:`datetime.datetime`
-    :param value: (Optional) the timestamp
-
-    :rtype: int, or ``NoneType``
-    :returns: the timestamp, in milliseconds, or None
-    """
-    if value is not None:
-        return _millis(value)
-
-
-def _microseconds_from_datetime(value):
-    """Convert non-none datetime to microseconds.
-
-    :type value: :class:`datetime.datetime`
-    :param value: The timestamp to convert.
-
-    :rtype: int
-    :returns: The timestamp, in microseconds.
-    """
-    if not value.tzinfo:
-        value = value.replace(tzinfo=UTC)
-    # Regardless of what timezone is on the value, convert it to UTC.
-    value = value.astimezone(UTC)
-    # Convert the datetime to a microsecond timestamp.
-    return int(calendar.timegm(value.timetuple()) * 1e6) + value.microsecond
-
-
-def _millis(when):
-    """Convert a zone-aware datetime to integer milliseconds.
-
-    :type when: :class:`datetime.datetime`
-    :param when: the datetime to convert
-
-    :rtype: int
-    :returns: milliseconds since epoch for ``when``
-    """
-    micros = _microseconds_from_datetime(when)
-    return micros // 1000
 
 
 def _date_from_iso8601_date(value):
@@ -67,7 +40,7 @@ def _date_from_iso8601_date(value):
     :returns: A datetime date object created from the string
 
     """
-    return datetime.datetime.strptime(value, '%Y-%m-%d').date()
+    return datetime.datetime.strptime(value, _YEAR_MONTH_DAY).date()
 
 
 def _not_null(value, field):
@@ -107,7 +80,7 @@ def _string_from_json(value, _):
 def _bytes_from_json(value, field):
     """Base64-decode value"""
     if _not_null(value, field):
-        return base64.standard_b64decode(_to_bytes(value))
+        return base64.standard_b64decode(value)
 
 
 def _datetime_from_microseconds(value):
@@ -120,36 +93,6 @@ def _datetime_from_microseconds(value):
     :returns: The datetime object created from the value.
     """
     return _EPOCH + datetime.timedelta(microseconds=value)
-
-
-def _to_bytes(value, encoding='ascii'):
-    """Converts a string value to bytes, if necessary.
-
-    Unfortunately, ``six.b`` is insufficient for this task since in
-    Python2 it does not modify ``unicode`` objects.
-
-    :type value: str / bytes or unicode
-    :param value: The string/bytes value to be converted.
-
-    :type encoding: str
-    :param encoding: The encoding to use to convert unicode to bytes. Defaults
-                     to "ascii", which will not allow any characters from
-                     ordinals larger than 127. Other useful values are
-                     "latin-1", which which will only allows byte ordinals
-                     (up to 255) and "utf-8", which will encode any unicode
-                     that needs to be.
-
-    :rtype: str / bytes
-    :returns: The original value converted to bytes (if unicode) or as passed
-              in if it started out as bytes.
-    :raises TypeError: if the value could not be converted to bytes.
-    """
-    result = (value.encode(encoding)
-              if isinstance(value, six.text_type) else value)
-    if isinstance(result, six.binary_type):
-        return result
-    else:
-        raise TypeError('%r could not be converted to bytes' % (value,))
 
 
 def _timestamp_from_json(value, field):
@@ -175,9 +118,8 @@ def _datetime_from_json(value, field):
         if '.' in value:
             # YYYY-MM-DDTHH:MM:SS.ffffff
             return datetime.datetime.strptime(value, _RFC3339_MICROS_NO_ZULU)
-        else:
-            # YYYY-MM-DDTHH:MM:SS
-            return datetime.datetime.strptime(value, _RFC3339_NO_FRACTION)
+        # YYYY-MM-DDTHH:MM:SS
+        return datetime.datetime.strptime(value, _RFC3339_NO_FRACTION)
     else:
         return None
 
@@ -245,38 +187,36 @@ _CELLDATA_FROM_JSON = {
 class SchemaField:
     """Class represent single field in schema"""
 
-    def __init__(self, name, field_type, mode='NULLABLE',
-                 description=None, fields=()):
-        self.name = name
-        self.field_type = field_type
-        self.mode = mode
-        self.description = description
-
-        self.fields = tuple(fields)
-
-    @classmethod
-    def from_api_repr(cls, api_repr):
-        # Handle optional properties with default values
-        mode = api_repr.get('mode', 'NULLABLE')
-        description = api_repr.get('description')
+    def __init__(self, api_repr):
+        self.name = api_repr['name']
+        self.field_type = api_repr['type'].upper()
+        self.mode = api_repr.get('mode', 'NULLABLE')
+        self.description = api_repr.get('description')
         fields = api_repr.get('fields', ())
-        return cls(
-            field_type=api_repr['type'].upper(),
-            fields=[cls.from_api_repr(f) for f in fields],
-            mode=mode.upper(),
-            description=description,
-            name=api_repr['name'])
+
+        self.fields = [SchemaField(f) for f in fields]
 
 
 class Schema:
     """
-    Build schema from query_job response
+    Build schema from query_job response.
+
+    Google return query results in raw format.
+    Part of response contain schema description for this data.
+    All fields should be converted to proper python types defined by this schema.
+    This class should parse and represent schema from api response.
+
+    Reference: https://cloud.google.com/bigquery/docs/schemas
     """
-    def __init__(self, api_respose):
+    def __init__(self, api_response):
         self.schema = []
 
-        for field in api_respose['schema']['fields']:
-            self.schema.append(SchemaField.from_api_repr(field))
+        for field in api_response['schema']['fields']:
+            self.schema.append(SchemaField(field))
+
+
+class BigQuerySchemaError(Exception):
+    pass
 
 
 class QueryJob:
@@ -306,6 +246,8 @@ class QueryJob:
         """
         row_data = {}
         for field, cell in zip(self.schema, row['f']):
+            if field.field_type not in _CELLDATA_FROM_JSON:
+                raise BigQuerySchemaError('Unknown field type %s' % field.field_type)
             converter = _CELLDATA_FROM_JSON[field.field_type]
             if field.mode == 'REPEATED':
                 row_data[field.name] = [converter(item['v'], field) for item in cell['v']]
