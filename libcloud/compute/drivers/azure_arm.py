@@ -1362,6 +1362,22 @@ class AzureNodeDriver(NodeDriver):
             parsed_url = six.moves.urllib.parse.urlparse(next_link)
             params = six.moves.urllib.parse.parse_qs(parsed_url.query)
 
+    def ex_get_active_billing_period(self, api_version='2017-04-24-preview'):
+        """Get subscription active billing period
+
+        :param str api_version: api version
+        :rtype: dict
+        """
+        action = '/subscriptions/%s/providers/Microsoft.Billing/' \
+                 'billingPeriods' % self.subscription_id
+
+        params = {
+            'api-version': api_version,
+            '$top': 1
+        }
+        r = self.connection.request(action, params=params)
+        return r.object
+
     def ex_list_publishers(self, location=None):
         """
         List node image publishers.
