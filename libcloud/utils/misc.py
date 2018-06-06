@@ -46,7 +46,8 @@ __all__ = [
     'get_secure_random_string',
     'retry',
 
-    'ReprMixin'
+    'ReprMixin',
+    'PageList'
 ]
 
 # Error message which indicates a transient SSL error upon which request
@@ -397,3 +398,71 @@ def retry(retry_exceptions=None, retry_delay=None, timeout=None,
                     time.sleep(delay)
         return retry_loop
     return decorator
+
+
+class PageList(object):
+    """
+    An Iterator that wraps list request functions to encapsulate pagination.
+    """
+    page_token_name = None
+    page_size_name = None
+
+    def __init__(self, list_fn, fn_args, fn_kwargs, page_size=0, transform_fn=None):
+        """
+        :param function list_fn: list function that has pagination parameter.
+        :param list fn_args: list of function arguments.
+        :param dict fn_kwargs: dict of function keyword arguments
+        :param function transform_fn: transform function to be applied on the
+            page of results.
+        """
+        self.list_fn = list_fn
+        self.fn_args = fn_args
+        self.fn_kwargs = fn_kwargs
+        self.page_size = page_size
+        self.transform_fn = transform_fn
+        self.response = None
+        self.current_page = None
+
+    def next_page_token(self):
+        """
+        Returns value of the next page token/marker. None if there are no more
+        pages.
+        Subclasses need specify page_token_name and to implement this method
+        in order for page() method to know how to select pages.
+        """
+        raise NotImplementedError()
+
+    def set_next_page_token(self):
+        self.fn_kwargs[self.page_token_name] = self.next_page_token()
+
+    def set_page_size(self):
+        self.fn_kwargs[self.page_size_name] = self.page_size
+
+    def has_more(self):
+        """
+        Returns True if there is still data to request.
+        """
+        return self.current_page is None or self.next_page_token() is not None
+
+    def page(self):
+        """
+        Requests/lists next page of data. Applies next page token automatically
+        and transform function to the result of the request.
+        """
+        self.set_page_size()
+        self.response = self.list_fn(*self.fn_args, **self.fn_kwargs)
+        if self.page_token_name is not None:
+           self.set_next_page_token()
+        if self.transform_fn:
+            self.current_page = self.transform_fn(self.response)
+        else:
+            self.current_page = self.response
+        return self.current_page
+
+    def __iter__(self):
+        """
+        Iterates over elements of all pages.
+        """
+        while self.has_more():
+            for item in self.page():
+                yield item

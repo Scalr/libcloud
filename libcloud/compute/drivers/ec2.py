@@ -25,8 +25,8 @@ import copy
 import warnings
 import time
 
+from libcloud.utils import misc as misc_utils
 from libcloud.utils.py3 import b, basestring, ensure_string
-
 from libcloud.utils.xml import fixxpath, findtext, findattr, findall
 from libcloud.utils.publickey import get_pubkey_ssh2_fingerprint
 from libcloud.utils.publickey import get_pubkey_comment
@@ -3565,6 +3565,15 @@ class EC2VolumeModification(object):
                    self.volume_id))
 
 
+class EC2PageList(misc_utils.misc.PageList):
+    page_token_name = 'nextToken'
+    page_size_name = 'maxResults'
+
+    def next_page_token(self):
+        return findtext(element=self.response, xpath='nextToken',
+                        namespace=NAMESPACE)
+
+
 class BaseEC2NodeDriver(NodeDriver):
     """
     Base Amazon EC2 node driver.
@@ -3627,12 +3636,16 @@ class BaseEC2NodeDriver(NodeDriver):
         if ex_filters:
             params.update(self._build_filters(ex_filters))
 
-        elem = self.connection.request(self.path, params=params).object
+        # elem = self.connection.request(self.path, params=params).object
 
-        nodes = []
-        for rs in findall(element=elem, xpath='reservationSet/item',
-                          namespace=NAMESPACE):
-            nodes += self._to_nodes(rs, 'instancesSet/item')
+        # TODO:
+        elements = EC2PageList(
+            self.connection.request,
+            (self.path,),
+            {'params': params},
+            page_size=1000,
+            trasform_fn=lambda x: findall(x.object, xpath='reservationSet/item', namespace=NAMESPACE))
+        nodes = [self._to_nodes(el, 'instancesSet/item') for el in elements]
 
         nodes_elastic_ips_mappings = self.ex_describe_addresses(nodes)
 
