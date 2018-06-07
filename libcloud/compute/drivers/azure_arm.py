@@ -36,6 +36,7 @@ from libcloud.common.types import LibcloudError
 from libcloud.storage.types import ObjectDoesNotExistError
 from libcloud.common.exceptions import BaseHTTPError
 from libcloud.storage.drivers.azure_blobs import AzureBlobsStorageDriver
+from libcloud.utils import misc as misc_utils
 from libcloud.utils.py3 import basestring
 from libcloud.utils import iso8601
 
@@ -160,6 +161,15 @@ class AzureIPAddress(object):
     def __repr__(self):
         return (('<AzureIPAddress: id=%s, name=%s ...>')
                 % (self.id, self.name))
+
+
+class AzurePageList(misc_utils.PageList):
+    page_token_name = 'nextToken'
+    page_size_name = 'maxResults'
+
+    def next_page_token(self):
+        return findtext(element=self.response, xpath='nextToken',
+                        namespace=NAMESPACE)
 
 
 class AzureNodeDriver(NodeDriver):

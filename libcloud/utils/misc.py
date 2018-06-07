@@ -400,28 +400,80 @@ def retry(retry_exceptions=None, retry_delay=None, timeout=None,
     return decorator
 
 
+class UnknownScope(Exception):
+    """ Error to signalize unknown scope in PageList.apply"""
+
+
 class PageList(object):
     """
     An Iterator that wraps list request functions to encapsulate pagination.
+
+    Usage example (this class needs to be inherited to implement
+        page_token_name, page_size_name, and next_page_token()
+        for the pagination to be possible):
+    1. Treat pager as unbroken list of elements
+    >>> node_pager = SomeCloudPageList(
+            connection.request,
+            (arg1,),
+            {'kwarg1': val1,
+             'kwarg2': val2},
+            page_size=20,
+            split_fn=lambda x: x.split(';'))
+    >>> for node in node_pager:  # node_pager will automatically "switch" pages
+            save_node_info(node)
+
+    2. Process elements page by page. (Note: the request may return next_token,
+        but the next page may be empty. In that case page() will return []
+        and only on the succeeding call it will return None)
+    >>> node_pager = SomeCloudPageList(
+            connection.request,
+            (arg1,),
+            {'kwarg1': val1,
+             'kwarg2': val2},
+            page_size=20,
+            split_fn=lambda x: x.split(';'))
+    >>> current_page = node_pager.page()
+    >>> while current_page:
+            for node in current_page:
+                do_work(node)
+            signal_batch_finished()
+            current_page = node_pager.page()
     """
     page_token_name = None
     page_size_name = None
 
-    def __init__(self, list_fn, fn_args, fn_kwargs, page_size=0, transform_fn=None):
+    def __init__(self, list_fn, fn_args, fn_kwargs, page_size=0, split_fn=None):
         """
         :param function list_fn: list function that has pagination parameter.
         :param list fn_args: list of function arguments.
         :param dict fn_kwargs: dict of function keyword arguments
-        :param function transform_fn: transform function to be applied on the
-            page of results.
+        :param function split_fn: function to be applied to the response page.
+            Must return list.
         """
         self.list_fn = list_fn
         self.fn_args = fn_args
         self.fn_kwargs = fn_kwargs
         self.page_size = page_size
-        self.transform_fn = transform_fn
+        self.split_fn = split_fn
         self.response = None
         self.current_page = None
+        self.applied_functions = []
+
+    def apply(self, func, scope='element'):
+        """
+        Applies function to the page.
+
+        :param function func: function to be applied. Must accept 1 argument.
+        :param str scope: If scope is 'element' func will be applied to each
+            element. func must return an updated or new element.
+            If scope is 'page', then func will receive the whole
+            page as a list and the func must return a list.
+        """
+        if scope not in ['element', 'page']:
+            raise UnknownScope(
+                'The scope should be "element" or "page", got {}'
+                .format(scope))
+        self.applied_functions.append((func, scope))
 
     def next_page_token(self):
         """
@@ -449,14 +501,34 @@ class PageList(object):
         Requests/lists next page of data. Applies next page token automatically
         and transform function to the result of the request.
         """
+        if not self.has_more():
+            return None
+
         self.set_page_size()
         self.response = self.list_fn(*self.fn_args, **self.fn_kwargs)
+
+        # Saving page token for later use
         if self.page_token_name is not None:
            self.set_next_page_token()
-        if self.transform_fn:
-            self.current_page = self.transform_fn(self.response)
+
+        # If response is not a list, there should be split_fn to break response
+        # into elements and return a list of them.
+        if self.split_fn:
+            self.current_page = self.split_fn(self.response)
         else:
             self.current_page = self.response
+
+        # Applying delayed functions to the page.
+        for f, scope in self.applied_functions:
+            if scope == 'element':
+                self.current_page = [f(el) for el in self.current_page]
+            elif scope == 'page':
+                self.current_page = f(self.current_page)
+            else:
+                raise UnknownScope(
+                    'The scope should be "element" or "page", got {}'
+                    .format(scope))
+
         return self.current_page
 
     def __iter__(self):

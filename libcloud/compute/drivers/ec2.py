@@ -3565,13 +3565,23 @@ class EC2VolumeModification(object):
                    self.volume_id))
 
 
-class EC2PageList(misc_utils.misc.PageList):
-    page_token_name = 'nextToken'
-    page_size_name = 'maxResults'
+class EC2PageList(misc_utils.PageList):
+    page_token_name = 'NextToken'
+    page_size_name = 'MaxResults'
+
+    def set_next_page_token(self):
+        next_token = self.next_page_token()
+        if next_token:
+            self.fn_kwargs['params'][self.page_token_name] = next_token
+
+    def set_page_size(self):
+        if self.page_size:
+            self.fn_kwargs['params'][self.page_size_name] = self.page_size
 
     def next_page_token(self):
-        return findtext(element=self.response, xpath='nextToken',
-                        namespace=NAMESPACE)
+        if self.response:
+            return findtext(element=self.response.object, xpath='nextToken',
+                            namespace=NAMESPACE)
 
 
 class BaseEC2NodeDriver(NodeDriver):
@@ -3610,7 +3620,7 @@ class BaseEC2NodeDriver(NodeDriver):
         'error': VolumeSnapshotState.ERROR,
     }
 
-    def list_nodes(self, ex_node_ids=None, ex_filters=None):
+    def list_nodes(self, ex_node_ids=None, ex_filters=None, ex_page_size=1000):
         """
         Lists all nodes.
 
@@ -3636,24 +3646,27 @@ class BaseEC2NodeDriver(NodeDriver):
         if ex_filters:
             params.update(self._build_filters(ex_filters))
 
-        # elem = self.connection.request(self.path, params=params).object
+        def _split_fn(resp):
+            nodes = []
+            for rs in findall(resp.object, xpath='reservationSet/item', namespace=NAMESPACE):
+                nodes += self._to_nodes(rs, 'instancesSet/item')
+            return nodes
 
-        # TODO:
-        elements = EC2PageList(
+        def _extend_adresses(page):
+            nodes_elastic_ips_mappings = self.ex_describe_addresses(page)
+            for node in page:
+                ips = nodes_elastic_ips_mappings[node.id]
+                node.public_ips.extend(ips)
+            return page
+
+        node_pager = EC2PageList(
             self.connection.request,
             (self.path,),
             {'params': params},
-            page_size=1000,
-            trasform_fn=lambda x: findall(x.object, xpath='reservationSet/item', namespace=NAMESPACE))
-        nodes = [self._to_nodes(el, 'instancesSet/item') for el in elements]
-
-        nodes_elastic_ips_mappings = self.ex_describe_addresses(nodes)
-
-        for node in nodes:
-            ips = nodes_elastic_ips_mappings[node.id]
-            node.public_ips.extend(ips)
-
-        return nodes
+            page_size=ex_page_size,
+            split_fn=_split_fn)
+        node_pager.apply(_extend_adresses, scope='page')
+        return node_pager
 
     def list_sizes(self, location=None):
         available_types = REGION_DETAILS[self.region_name]['instance_types']
