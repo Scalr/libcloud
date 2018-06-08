@@ -135,6 +135,34 @@ class VSphereNodeDriver(NodeDriver):
 
         return kwargs
 
+    def list_nodes(
+            self,
+            ex_datacenter=None,
+            ex_cluster=None,
+            ex_resource_pool=None):
+        """
+        Lists nodes, excluding templates.
+        """
+        if ex_cluster is not None:
+            raise NotImplementedError(
+                'ex_cluster filter is not implemented yet.')
+        if ex_resource_pool is not None:
+            raise NotImplementedError(
+                'ex_resource_pool filter is not implemented yet.')
+
+        virtual_machines = self._list_virtual_machines(
+            datacenter=ex_datacenter,
+            cluster=ex_cluster,
+            resource_pool=ex_resource_pool,
+            is_template=False)
+        nodes = [self._to_node(vm) for vm in virtual_machines]
+
+        creation_dates = self._query_nodes_creation_date()
+        for node in nodes:
+            node.extra['create_time'] = creation_dates.get(node.id)
+
+        return nodes
+
     def list_images(self, ex_datacenter=None):
         """
         List available images (templates).
@@ -142,7 +170,14 @@ class VSphereNodeDriver(NodeDriver):
         virtual_machines = self._list_virtual_machines(
             datacenter=ex_datacenter,
             is_template=True)
-        return [self._to_image(vm_image) for vm_image in virtual_machines]
+        images = [self._to_image(vm_image) for vm_image in virtual_machines]
+
+        creation_dates = self._query_nodes_creation_date()
+        for image in images:
+            image.extra['create_time'] = creation_dates.get(image.id)
+
+        return images
+
 
     def list_volumes(self, node=None):
         if node:
@@ -271,28 +306,6 @@ class VSphereNodeDriver(NodeDriver):
         if not vm:
             raise LibcloudError("Unable to locate VirtualMachine.")
         return vm
-
-    def list_nodes(
-            self,
-            ex_datacenter=None,
-            ex_cluster=None,
-            ex_resource_pool=None):
-        """
-        Lists nodes, excluding templates.
-        """
-        if ex_cluster is not None:
-            raise NotImplementedError(
-                'ex_cluster filter is not implemented yet.')
-        if ex_resource_pool is not None:
-            raise NotImplementedError(
-                'ex_resource_pool filter is not implemented yet.')
-
-        virtual_machines = self._list_virtual_machines(
-            datacenter=ex_datacenter,
-            cluster=ex_cluster,
-            resource_pool=ex_resource_pool,
-            is_template=False)
-        return [self._to_node(vm) for vm in virtual_machines]
 
     def _list_virtual_machines(
             self,
