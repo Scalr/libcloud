@@ -141,7 +141,7 @@ class VSphereNodeDriver(NodeDriver):
             ex_cluster=None,
             ex_resource_pool=None):
         """
-        Lists nodes, excluding templates.
+        Lists available nodes (excluding templates).
         """
         if ex_cluster is not None:
             raise NotImplementedError(
@@ -157,7 +157,7 @@ class VSphereNodeDriver(NodeDriver):
             is_template=False)
         nodes = [self._to_node(vm) for vm in virtual_machines]
 
-        creation_dates = self._query_nodes_creation_date()
+        creation_dates = self._query_nodes_creation_dates()
         for node in nodes:
             node.extra['create_time'] = creation_dates.get(node.id)
 
@@ -172,28 +172,30 @@ class VSphereNodeDriver(NodeDriver):
             is_template=True)
         images = [self._to_image(vm_image) for vm_image in virtual_machines]
 
-        creation_dates = self._query_nodes_creation_date()
+        creation_dates = self._query_nodes_creation_dates()
         for image in images:
             image.extra['create_time'] = creation_dates.get(image.id)
 
         return images
 
-
     def list_volumes(self, node=None):
-        if node:
-            vms = [self.ex_get_vm(node)]
+        """
+        List available volumes (on all datastores).
+        """
+        if node is not None:
+            virtual_machines = [self.ex_get_vm(node)]
         else:
-            vms = self._list_virtual_machines()
+            virtual_machines = self._list_virtual_machines()
 
         volumes = []
-        for vm in vms:
+        for vm in virtual_machines:
             volumes.extend([
                 self._to_volume(prop)
                 for prop in self._get_vm_virtual_disks_properties(vm)])
 
-        creation_dates = self._query_volumes_creation_date(
-            volumes,
-            virtual_machine=vms[0] if node is not None else None)
+        filter_by_vm = virtual_machines[0] if node is not None else None
+        creation_dates = self._query_volumes_creation_dates(
+            volumes, virtual_machine=filter_by_vm)
         for volume in volumes:
             device_id = volume.extra['device']['disk_object_id']
             volume.extra['create_time'] = creation_dates.get(device_id)
@@ -202,7 +204,7 @@ class VSphereNodeDriver(NodeDriver):
 
     def list_snapshots(self, node=None):
         """
-        Return the list of all snapshots.
+        List available snapshots.
         """
         snapshots = []
         virtual_machines = [
@@ -231,7 +233,13 @@ class VSphereNodeDriver(NodeDriver):
                 snapshot_data.extend(self._walk_snapshot_tree(child_tree))
         return snapshot_data
 
-    def _query_nodes_creation_date(self, virtual_machine=None):
+    def _query_nodes_creation_dates(self, virtual_machine=None):
+        """
+        Fetches the creation dates of the VMs from the event history.
+
+        :type virtual_machine: :class:`vim.VirtualMachine`
+        :rtype: dict[str, :class:`datetime.datetime`]
+        """
         created_events = self._query_events(
             event_type_id=[
                 'VmBeingDeployedEvent',
@@ -244,9 +252,13 @@ class VSphereNodeDriver(NodeDriver):
             event.vm.vm._GetMoId(): event.createdTime
             for event in created_events}
 
-    def _query_volumes_creation_date(self, volumes, virtual_machine=None):
+    def _query_volumes_creation_dates(self, volumes, virtual_machine=None):
         """
-        :type volumes: list of :class:`Volumes`
+        Fetches the creation dates of the volumes from the event history.
+
+        :type volumes: list[:class:`Volumes`]
+        :type virtual_machine: :class:`vim.VirtualMachine`
+        :rtype: dict[str, :class:`datetime.datetime`]
         """
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
@@ -254,16 +266,22 @@ class VSphereNodeDriver(NodeDriver):
             system_user=True,
         )  # type: list[vim.Event]
 
-        nodes_creation_dates = self._query_nodes_creation_date(
+        nodes_creation_dates = self._query_nodes_creation_dates(
             virtual_machine=virtual_machine,
         )  # type: list[vim.Event]
 
-        volume_files = {}
+        datastores_info = [
+            datastore.info for datastore in self._list_datastores()
+        ]  # type: list[vim.host.VmfsDatastoreInfo]
         creation_dates = {}  # type: dict[str, datetime.datetime]
+        extra_volumes_files = {} # type: dict[str, str]
+
         for volume in volumes:
             device = volume.extra['device']
             device_id = device['disk_object_id']
 
+            # 1. Root volume
+            #
             # The default SCSI controller is numbered as 0. When you create a
             # virtual machine, the default hard disk is assigned to the default
             # SCSI controller 0 at bus node (0:0).
@@ -274,18 +292,25 @@ class VSphereNodeDriver(NodeDriver):
                 creation_dates[device_id] = nodes_creation_dates.get(cloud_instance_id)
                 continue
 
+            # 2. Extra volume
             for volume_file in volume.extra['files']:
-                file_path = self._file_name_to_path(volume_file['name'])
-                volume_files[file_path] = device_id
+                volume_file_path = self._file_name_to_path(
+                    volume_file['name'],
+                    datastores_info=datastores_info)
+                extra_volumes_files[volume_file_path] = device_id
 
-        for event in reconfigure_events:
-            reconfigured_disks = [
+        # Search for timestamps of the extra volumes (2)
+        for event in reconfigure_events:  # lazy iterator with API pagination
+            reconfigured_devices = [
                 change.device for change in event.configSpec.deviceChange
-                if isinstance(change.device, vim.vm.device.VirtualDisk)]
-            for device in reconfigured_disks:
+                if isinstance(change.device, vim.vm.device.VirtualDisk) \
+                    and change.operation == 'add' \
+                    and change.fileOperation == 'create']
+
+            for device in reconfigured_devices:
                 attached_file = device.backing.fileName
-                if attached_file in volume_files:
-                    device_id = volume_files[attached_file]
+                if attached_file in extra_volumes_files:
+                    device_id = extra_volumes_files[attached_file]
                     creation_dates[device_id] = event.createdTime
             if len(creation_dates) == len(volumes):
                 break
@@ -297,7 +322,7 @@ class VSphereNodeDriver(NodeDriver):
         Searches VMs for a given instance_uuid or Node object.
 
         :type node_or_uuid: :class:`Node` | str
-        :rtype: :class:`vim.vm.VirtualMachine`
+        :rtype: :class:`vim.VirtualMachine`
         """
         if isinstance(node_or_uuid, Node):
             node_or_uuid = node_or_uuid.extra['instance_uuid']
@@ -314,6 +339,8 @@ class VSphereNodeDriver(NodeDriver):
             resource_pool=None,
             is_template=None):
         """
+        Lists available virtual machines and/or templates.
+
         :param is_template: bool
         """
         virtual_machines = []
@@ -332,7 +359,10 @@ class VSphereNodeDriver(NodeDriver):
 
     def _walk_folder(self, folder):
         """
-        :type folder: vim.Folder
+        Recursively walks the specified folder.
+
+        :type folder: :class:`vim.Folder`
+        :rtype: list
         """
         result = []
         for item in folder.childEntity:
@@ -378,7 +408,7 @@ class VSphereNodeDriver(NodeDriver):
         """
         return self.connection.client.RetrieveContent()
 
-    def _file_name_to_path(self, name, datastores=None):
+    def _file_name_to_path(self, name, datastores_info=None):
         """
         Converts file name to full path.
 
@@ -390,9 +420,12 @@ class VSphereNodeDriver(NodeDriver):
             raise LibcloudError("Unecpected file name format: {}".format(name))
         datastore_name, file_path = match.group(1, 2)
 
-        for datastore in (datastores or self._list_datastores()):
-            if datastore.info.name == datastore_name:
-                return '{}{}'.format(datastore.info.url, file_path)
+        if datastores_info is None:
+            datastores_info = [ds.info for ds in self._list_datastores()]
+
+        for datastore_info in datastores_info:
+            if datastore_info.name == datastore_name:
+                return '{}{}'.format(datastore_info.url, file_path)
 
         raise LibcloudError((
             "VMWare datastore '{}' not found."
@@ -478,7 +511,7 @@ class VSphereNodeDriver(NodeDriver):
          - https://pubs.vmware.com/vsphere-6-5/topic/com.vmware.wssdk.apiref.doc/vim.vm.FileLayoutEx.html
 
         :param virtual_machine: The virtual machine.
-        :type virtual_machine: :class:`vim.vm.device.VirtualMachine`
+        :type virtual_machine: :class:`vim.VirtualMachine`
 
         :rtype: list[dict]
         """
