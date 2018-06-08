@@ -174,7 +174,8 @@ class VSphereNodeDriver(NodeDriver):
 
         creation_dates = self._query_nodes_creation_dates()
         for image in images:
-            image.extra['create_time'] = creation_dates.get(image.id)
+            image_id = image.extra['managed_object_id']
+            image.extra['create_time'] = creation_dates.get(image_id)
 
         return images
 
@@ -707,4 +708,8 @@ class VSphereNodeDriver(NodeDriver):
         return NodeImage(
             id=config.uuid,
             name=config.name,
+            extra={
+                # pylint: disable=protected-access
+                'managed_object_id': virtual_machine._GetMoId(),
+            },
             driver=self)
