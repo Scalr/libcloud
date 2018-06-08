@@ -160,7 +160,8 @@ class VSphereNodeDriver(NodeDriver):
             volumes,
             virtual_machine=vms[0] if node is not None else None)
         for volume in volumes:
-            volume.extra['create_time'] = creation_dates.get(volume.id)
+            device_id = volume.extra['device']['disk_object_id']
+            volume.extra['create_time'] = creation_dates.get(device_id)
 
         return volumes
 
@@ -226,6 +227,7 @@ class VSphereNodeDriver(NodeDriver):
         creation_dates = {}  # type: dict[str, datetime.datetime]
         for volume in volumes:
             device = volume.extra['device']
+            device_id = device['disk_object_id']
 
             # The default SCSI controller is numbered as 0. When you create a
             # virtual machine, the default hard disk is assigned to the default
@@ -234,12 +236,12 @@ class VSphereNodeDriver(NodeDriver):
             # node (z:7).
             if device['scsi_unit_number'] == 7 and device['scsi_bus_number'] == 0:
                 cloud_instance_id = volume.extra['owner_id']
-                creation_dates[volume.id] = nodes_creation_dates.get(cloud_instance_id)
+                creation_dates[device_id] = nodes_creation_dates.get(cloud_instance_id)
                 continue
 
             for volume_file in volume.extra['files']:
                 file_path = self._file_name_to_path(volume_file['name'])
-                volume_files[file_path] = volume.id
+                volume_files[file_path] = device_id
 
         for event in reconfigure_events:
             reconfigured_disks = [
@@ -248,8 +250,8 @@ class VSphereNodeDriver(NodeDriver):
             for device in reconfigured_disks:
                 attached_file = device.backing.fileName
                 if attached_file in volume_files:
-                    volume_id = volume_files[attached_file]
-                    creation_dates[volume_id] = event.createdTime
+                    device_id = volume_files[attached_file]
+                    creation_dates[device_id] = event.createdTime
             if len(creation_dates) == len(volumes):
                 break
 
@@ -471,9 +473,6 @@ class VSphereNodeDriver(NodeDriver):
         if not layout_ex:
             return []
 
-        # if virtual_machine.summary.config.template:
-        #     return []
-
         cloud_instance_id = virtual_machine._GetMoId()
         vm_devices = virtual_machine.config.hardware.device
         vm_virtual_disks = {
@@ -521,7 +520,7 @@ class VSphereNodeDriver(NodeDriver):
             disk_files = []
             committed = 0
             descriptor = None
-            for chain in getattr(disk_info, "chain", ()):
+            for chain in getattr(disk_info, 'chain', ()):
                 for file_key in chain.fileKey:
                     f = files[file_key]
                     disk_files.append(f)
@@ -609,58 +608,53 @@ class VSphereNodeDriver(NodeDriver):
         :returns StorageVolume: Storage volume object
         """
         return StorageVolume(
-            id=disk_properties['device']['disk_object_id'],
+            # XXX: use disk_properties['device']['disk_object_id'] instead
+            id=disk_properties['device']['key'],
             name=disk_properties['label'],
             size=int(disk_properties['capacity']),
             driver=self,
             extra=disk_properties)
 
-    def _to_snapshot(self, snapshot):
+    def _to_snapshot(self, snapshot_tree):
         """
-        Creates :class:`VolumeSnapshot` object from disk properties.
+        Creates :class:`VolumeSnapshot` object from disk snapshot tree.
 
-        :param dict disk_properties: dict in format that
-            :meth:`self._get_vm_virtual_disks_properties` returns.
+        See:
+          - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.SnapshotTree.html
+          - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.Snapshot.html
 
-        :returns StorageVolume: Storage volume object
+        :type snapshot: :class:`vim.vm.SnapshotTree`
+
+        :returns: Storage volume snapthot.
+        :rtype: :class:`VolumeSnapshot`
         """
-        # https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.Snapshot.html
-
+        layout = snapshot_tree.vm.layoutEx
+        snapshot = snapshot_tree.snapshot
         extra = {
-            'name': snapshot.name,
-            'description': snapshot.description,
-            'create_time': snapshot.createTime,
-            'state': snapshot.state,
-            'quiesced': snapshot.quiesced,
-            'backup_manifest': snapshot.backupManifest,
-            'replay_supported': snapshot.replaySupported
+            'name': snapshot_tree.name,
+            'description': snapshot_tree.description,
+            'create_time': snapshot_tree.createTime,
+            'quiesced': snapshot_tree.quiesced,
+            'backup_manifest': snapshot_tree.backupManifest,
+            'replay_supported': snapshot_tree.replaySupported,
+            'state': snapshot_tree.state,  # the power state of the virtual machine
         }
-        # snapshot.state # poweredOn
-
-        def get_snapshot_size(vsphere_vm):
-            """returns snapshot size, in GB for a VM"""
-            disk_list = vsphere_vm.layoutEx.file
-            size = 0
-            for disk in disk_list:
-                if disk.type == 'snapshotData':
-                    size += disk.size
-                ss_disk = re.search(r'0000\d\d', disk.name)
-                if ss_disk:
-                    size += disk.size
-
-            size_gb = (float(size) / 1024 / 1024 / 1024)
-            return round(size_gb, 2)
-
-        # print('size', get_snapshot_size(snapshot.vm))
+        snapshot_data_keys = [
+            item.dataKey for item in layout.snapshot
+            if item.key == snapshot]
+        capacity_in_kb = sum(
+            disk.size for disk in layout.file
+            if disk.key in snapshot_data_keys and disk.type == 'snapshotData'
+        ) / 1024.0
 
         return VolumeSnapshot(
-            id=snapshot.id,
+            id=snapshot_tree.id,
+            name=snapshot_tree.name,
             driver=self,
-            # size=int(size),
+            size=int(capacity_in_kb),
             extra=extra,
-            created=snapshot.createTime,
-            state=snapshot.state,
-            name=snapshot.name)
+            created=snapshot_tree.createTime,
+            state=None)
 
     def _to_image(self, virtual_machine):
         config = virtual_machine.summary.config
