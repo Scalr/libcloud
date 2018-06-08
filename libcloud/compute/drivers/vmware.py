@@ -22,6 +22,18 @@ import ipaddress
 import re
 import ssl
 
+try:
+    import urlparse
+except ImportError:
+    import urllib.parse as urlparse
+
+try:
+    from pyVim import connect
+    from pyVmomi import vim
+except ImportError:
+    raise ImportError('Missing "pyvmomi" dependency. You can install it '
+                      'using pip - pip install pyvmomi')
+
 from libcloud.common.base import ConnectionUserAndKey
 from libcloud.common.types import InvalidCredsError
 from libcloud.common.types import LibcloudError
@@ -33,20 +45,6 @@ from libcloud.compute.base import VolumeSnapshot
 from libcloud.compute.types import NodeState
 from libcloud.compute.types import Provider
 from libcloud.utils.networking import is_public_subnet
-
-try:
-    import urlparse
-except ImportError:
-    import urllib.parse as urlparse
-
-try:
-    from pyVim import connect
-    from pyVmomi import vim
-    from pyVmomi import vmodl
-except ImportError:
-    raise ImportError('Missing "pyvmomi" dependency. You can install it '
-                      'using pip - pip install pyvmomi')
-
 
 
 __all__ = [
