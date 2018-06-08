@@ -26,11 +26,11 @@ except ImportError:
 import warnings
 import base64
 
+from libcloud.utils import misc as misc_utils
 from libcloud.utils.py3 import httplib
 from libcloud.utils.py3 import b
 from libcloud.utils.py3 import next
 from libcloud.utils.py3 import urlparse
-
 
 from libcloud.common.openstack import OpenStackBaseConnection
 from libcloud.common.openstack import OpenStackDriverMixin
@@ -65,6 +65,31 @@ ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
 
 DEFAULT_API_VERSION = '1.1'
 
+DEFAULT_PAGE_SIZE = 1000
+
+
+class OpenStackPageList(misc_utils.PageList):
+    page_token_name = 'marker'
+    page_size_name = 'limit'
+
+    def set_next_page_token(self):
+        next_token = self.next_page_token()
+        if next_token:
+            self.fn_kwargs['params'][self.page_token_name] = next_token
+
+    def set_page_size(self):
+        if self.page_size:
+            self.fn_kwargs['params'][self.page_size_name] = self.page_size
+
+    def next_page_token(self):
+        # OpenStack uses id of the last element in page as a token/marker.
+        # So although technically it is always present, we need to make an
+        # additional page size check to avoid unnecessary request.
+        if self.current_page and len(self.current_page) >= self.page_size:
+            # Page elements must be objects of the corresponding type classes.
+            # And have `id` field.
+            # E.g. Node objects, Volume objects, etc.
+            return self.current_page[-1].id
 
 class OpenStackComputeConnection(OpenStackBaseConnection):
     # default config for http://devstack.org/
@@ -159,7 +184,7 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
     def reboot_node(self, node):
         return self._reboot_node(node, reboot_type='HARD')
 
-    def list_nodes(self, ex_all_tenants=False):
+    def list_nodes(self, ex_all_tenants=False, ex_page_size=DEFAULT_PAGE_SIZE):
         """
         List the nodes in a tenant
 
@@ -171,8 +196,14 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
         params = {}
         if ex_all_tenants:
             params = {'all_tenants': 1}
-        return self._to_nodes(
-            self.connection.request('/servers/detail', params=params).object)
+
+        node_paginator = OpenStackPageList(
+            self.connection.request,
+            ('/servers/detail',),
+            {'params': params},
+            page_size=ex_page_size,
+            split_fn=lambda response: self._to_nodes(response.object))
+        return node_paginator
 
     def create_volume(self, size, name, location=None, snapshot=None,
                       ex_volume_type=None):

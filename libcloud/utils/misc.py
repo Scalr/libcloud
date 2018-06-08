@@ -477,8 +477,9 @@ class PageList(object):
 
     def next_page_token(self):
         """
-        Returns value of the next page token/marker. None if there are no more
-        pages.
+        Returns value of the next page token/marker. Must return None
+        to signalize that there are no more pages to request.
+
         Subclasses need specify page_token_name and to implement this method
         in order for page() method to know how to select pages.
         """
@@ -507,10 +508,6 @@ class PageList(object):
         self.set_page_size()
         self.response = self.list_fn(*self.fn_args, **self.fn_kwargs)
 
-        # Saving page token for later use
-        if self.page_token_name is not None:
-           self.set_next_page_token()
-
         # If response is not a list, there should be split_fn to break response
         # into elements and return a list of them.
         if self.split_fn:
@@ -528,6 +525,10 @@ class PageList(object):
                 raise UnknownScope(
                     'The scope should be "element" or "page", got {}'
                     .format(scope))
+
+        # Saving page token for later use
+        if self.page_token_name is not None:
+           self.set_next_page_token()
 
         return self.current_page
 

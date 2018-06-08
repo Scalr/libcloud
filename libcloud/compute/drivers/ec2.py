@@ -3565,6 +3565,9 @@ class EC2VolumeModification(object):
                    self.volume_id))
 
 
+DEFAULT_PAGE_SIZE = 1000
+
+
 class EC2PageList(misc_utils.PageList):
     page_token_name = 'NextToken'
     page_size_name = 'MaxResults'
@@ -3620,7 +3623,12 @@ class BaseEC2NodeDriver(NodeDriver):
         'error': VolumeSnapshotState.ERROR,
     }
 
-    def list_nodes(self, ex_node_ids=None, ex_filters=None, ex_page_size=1000):
+    def list_nodes(self, *args, **kwargs):
+        kwargs.setdefault('ex_page_size', None)
+        return list(self.iterate_nodes(*args, **kwargs))
+
+    def iterate_nodes(self, ex_node_ids=None, ex_filters=None,
+                      ex_page_size=DEFAULT_PAGE_SIZE):
         """
         Lists all nodes.
 
@@ -3635,6 +3643,10 @@ class BaseEC2NodeDriver(NodeDriver):
                                 information for certain nodes only.
         :type       ex_filters: ``dict``
 
+        :param      ex_page_size: The filters so that the list includes
+                                information for certain nodes only.
+        :type       ex_page_size: ``int``
+
         :rtype: ``list`` of :class:`Node`
         """
 
@@ -3646,27 +3658,29 @@ class BaseEC2NodeDriver(NodeDriver):
         if ex_filters:
             params.update(self._build_filters(ex_filters))
 
-        def _split_fn(resp):
+        def nodes_splitter(resp):
             nodes = []
-            for rs in findall(resp.object, xpath='reservationSet/item', namespace=NAMESPACE):
+            for rs in findall(resp.object, xpath='reservationSet/item',
+                              namespace=NAMESPACE):
                 nodes += self._to_nodes(rs, 'instancesSet/item')
             return nodes
 
-        def _extend_adresses(page):
+        def extend_adresses(page):
             nodes_elastic_ips_mappings = self.ex_describe_addresses(page)
             for node in page:
                 ips = nodes_elastic_ips_mappings[node.id]
                 node.public_ips.extend(ips)
             return page
 
-        node_pager = EC2PageList(
+        node_paginator = EC2PageList(
             self.connection.request,
             (self.path,),
             {'params': params},
             page_size=ex_page_size,
-            split_fn=_split_fn)
-        node_pager.apply(_extend_adresses, scope='page')
-        return node_pager
+            split_fn=nodes_splitter)
+        node_paginator.apply(extend_adresses, scope='page')
+
+        return node_paginator
 
     def list_sizes(self, location=None):
         available_types = REGION_DETAILS[self.region_name]['instance_types']
@@ -3771,7 +3785,12 @@ class BaseEC2NodeDriver(NodeDriver):
                     )
         return locations
 
-    def list_volumes(self, node=None, ex_volume_ids=None):
+    def list_volumes(self, *args, **kwargs):
+        kwargs.setdefault('ex_page_size', None)
+        return list(self.iterate_volumes(*args, **kwargs))
+
+    def iterate_volumes(self, node=None, ex_volume_ids=None,
+                        ex_page_size=DEFAULT_PAGE_SIZE):
         params = {
             'Action': 'DescribeVolumes',
         }
@@ -3782,11 +3801,18 @@ class BaseEC2NodeDriver(NodeDriver):
         if ex_volume_ids:
             params.update(self._pathlist('VolumeId', ex_volume_ids))
 
-        response = self.connection.request(self.path, params=params).object
-        volumes = [self._to_volume(el) for el in response.findall(
-            fixxpath(xpath='volumeSet/item', namespace=NAMESPACE))
-        ]
-        return volumes
+        def volume_splitter(response):
+            return [self._to_volume(el) for el in response.object.findall(
+                    fixxpath(xpath='volumeSet/item', namespace=NAMESPACE))]
+
+        volume_paginator = EC2PageList(
+            self.connection.request,
+            (self.path,),
+            {'params': params},
+            page_size=ex_page_size,
+            split_fn=volume_splitter)
+
+        return volume_paginator
 
     def create_node(self, **kwargs):
         """
@@ -4165,7 +4191,12 @@ class BaseEC2NodeDriver(NodeDriver):
         return [snapshot for snapshot in self.list_snapshots(owner='self')
                 if snapshot.extra["volume_id"] == volume.id]
 
-    def list_snapshots(self, snapshot=None, owner=None):
+    def list_snapshots(self, *args, **kwargs):
+        kwargs.setdefault('ex_page_size', None)
+        return list(self.iterate_snapshots(*args, **kwargs))
+
+    def iterate_snapshots(self, snapshot=None, owner=None,
+                          ex_page_size=DEFAULT_PAGE_SIZE):
         """
         Describes all snapshots.
 
@@ -4188,9 +4219,18 @@ class BaseEC2NodeDriver(NodeDriver):
             params.update({
                 'Owner.1': owner,
             })
-        response = self.connection.request(self.path, params=params).object
-        snapshots = self._to_snapshots(response)
-        return snapshots
+
+        def snapshot_splitter(response):
+            return self._to_snapshots(response.object)
+
+        snapshot_paginator = EC2PageList(
+            self.connection.request,
+            (self.path,),
+            {'params': params},
+            page_size=ex_page_size,
+            split_fn=snapshot_splitter)
+
+        return snapshot_paginator
 
     def destroy_volume_snapshot(self, snapshot):
         params = {
