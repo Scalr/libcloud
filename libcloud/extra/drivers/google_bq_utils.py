@@ -229,7 +229,7 @@ class QueryJob:
         self.page_token = response.get('pageToken')
         self.schema = Schema(response).schema
 
-        self.rows = self.rows_builder(response['rows'])
+        self.rows = self.rows_builder(response.get('rows', list()))
 
     def rows_builder(self, values):
         """Convert JSON row data to rows with appropriate types."""
