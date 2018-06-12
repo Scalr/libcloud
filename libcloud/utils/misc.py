@@ -527,8 +527,7 @@ class PageList(object):
                     .format(scope))
 
         # Saving page token for later use
-        if self.page_token_name is not None:
-           self.set_next_page_token()
+        self.set_next_page_token()
 
         return self.current_page
 
