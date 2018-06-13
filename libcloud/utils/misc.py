@@ -24,6 +24,7 @@ import socket
 import ssl
 import sys
 import time
+import types
 from datetime import datetime
 from datetime import timedelta
 from functools import wraps
@@ -459,6 +460,12 @@ class PageList(object):
         self.current_page = None
         self.applied_functions = []
 
+    def __add__(self, other):
+        """
+        Will fetch elements from self, then from other
+        """
+        return PageListSum([self, other])
+
     def apply(self, func, scope='element'):
         """
         Applies function to the page.
@@ -486,10 +493,12 @@ class PageList(object):
         raise NotImplementedError()
 
     def set_next_page_token(self):
-        self.fn_kwargs[self.page_token_name] = self.next_page_token()
+        if self.page_token_name is not None:
+            self.fn_kwargs[self.page_token_name] = self.next_page_token()
 
     def set_page_size(self):
-        self.fn_kwargs[self.page_size_name] = self.page_size
+        if self.page_size_name is not None:
+            self.fn_kwargs[self.page_size_name] = self.page_size
 
     def has_more(self):
         """
@@ -538,3 +547,49 @@ class PageList(object):
         while self.has_more():
             for item in self.page():
                 yield item
+
+
+class EmptyPageList(PageList):
+    """
+    Empty PageList iterator useful for when adding PageList together.
+    """
+
+    def __init__(self):
+        super(EmptyPageList, self).__init__(lambda: [], (), {})
+
+    def next_page_token(self):
+        return None
+
+
+class PageListSum(PageList):
+    """
+    Iterator over PageLists
+    """
+
+    def __init__(self, page_lists=None):
+        self.page_lists = page_lists or []
+
+    def __add__(self, other):
+        """
+        Will fetch elements from self, then from other
+        """
+        self.page_lists.append(other)
+
+    def has_more(self):
+        return any(pl.has_more() for pl in self.page_lists)
+
+    def page(self):
+        result = None
+        for pl in self.page_lists:
+            if pl.has_more():
+                result = pl.page()
+                if result:
+                    break
+        return result
+
+    @classmethod
+    def multiple_from_fn_iterator(cls, fn_iterator, *args, **kwargs):
+        """
+        Produces multiple PageLists for each function in fn_iterator.
+        """
+        return [cls(list_fn, *args, **kwargs) for list_fn in fn_iterator]
