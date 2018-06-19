@@ -325,7 +325,8 @@ class VSphereNodeDriver(NodeDriver):
         """
         if isinstance(node_or_uuid, Node):
             node_or_uuid = node_or_uuid.extra['instance_uuid']
-        vm = self._content.searchIndex.FindByUuid(
+        content = self._retrieve_content()
+        vm = content.searchIndex.FindByUuid(
             None, node_or_uuid, True, True)
         if not vm:
             raise LibcloudError("Unable to locate VirtualMachine.")
@@ -342,8 +343,9 @@ class VSphereNodeDriver(NodeDriver):
 
         :param is_template: bool
         """
+        content = self._retrieve_content()
         virtual_machines = []
-        for child in self._content.rootFolder.childEntity:
+        for child in content.rootFolder.childEntity:
             if not isinstance(child, vim.Datacenter):
                 continue
             if datacenter is not None and child.name != datacenter:
@@ -379,8 +381,9 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: list[:class:`vim.Datacenter`]
         """
+        content = self._retrieve_content()
         return [
-            entity for entity in self._content.rootFolder.childEntity
+            entity for entity in content.rootFolder.childEntity
             if isinstance(entity, vim.Datacenter)]
 
     def _list_datastores(self):
@@ -396,10 +399,9 @@ class VSphereNodeDriver(NodeDriver):
             for entity in datacenter.datastore
             if isinstance(entity, vim.Datastore)]
 
-    @property
-    def _content(self):
+    def _retrieve_content(self):
         """
-        Retrieves service content. 
+        Retrieves the properties of the service instance.
 
         See: https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.ServiceInstanceContent.html
 
@@ -489,7 +491,8 @@ class VSphereNodeDriver(NodeDriver):
                 userList=userlist,
                 systemUser=system_user or False)
 
-        history_collector = self._content.eventManager.CreateCollectorForEvents(
+        content = self._retrieve_content()
+        history_collector = content.eventManager.CreateCollectorForEvents(
             filter_spec)  # type: vim.event.EventHistoryCollector
         history_collector.SetCollectorPageSize(1000)
         history_collector.ResetCollector()
