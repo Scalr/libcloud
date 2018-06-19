@@ -18,6 +18,7 @@ VMware vSphere driver using pyvmomi - https://github.com/vmware/pyvmomi
 """
 
 import atexit
+import collections
 import ipaddress
 import ssl
 try:
@@ -27,6 +28,7 @@ except ImportError:
 
 try:
     from pyVim import connect
+    from pyVmomi import vim
     from pyVmomi import vmodl
 except ImportError:
     raise ImportError('Missing "pyvmomi" dependency. You can install it '
@@ -150,13 +152,16 @@ class VSphereNodeDriver(NodeDriver):
         else:
             vms = self._list_vms()
 
-        volumes = []
+        # grouping vm's disks by unique backing-file name
+        grouped_vm_disks = collections.defaultdict(list)
         for virtual_machine in vms:
-            volumes.extend([
-                self._to_volume(disk)
-                for disk in self._get_vm_disks(virtual_machine)])
+            for vm_disk in self._get_vm_disks(virtual_machine):
+                backing_file = vm_disk['device']['file_name']
+                grouped_vm_disks[backing_file].append(vm_disk)
 
-        return volumes
+        return [
+            self._to_volume(*vm_disks)
+            for vm_disks in grouped_vm_disks.values()]
 
     def ex_get_vm(self, node_or_uuid):
         """
@@ -268,6 +273,9 @@ class VSphereNodeDriver(NodeDriver):
                                  'label', None),
                 'summary': getattr(getattr(dev, 'deviceInfo', None),
                                    'summary', None),
+                'disk_mode': None,
+                'content_id': None,
+                'sharing': None,
             }
             # Network Device
             if hasattr(dev, 'macAddress'):
@@ -279,6 +287,15 @@ class VSphereNodeDriver(NodeDriver):
             # Disk
             if hasattr(dev, 'capacityInKB'):
                 d['capacity_in_kb'] = dev.capacityInKB
+            if hasattr(dev, 'diskObjectId'):
+                d['disk_object_id'] = dev.diskObjectId
+            if isinstance(dev, vim.vm.device.VirtualDisk):
+                backing = dev.backing
+                if isinstance(backing, vim.vm.device.VirtualDevice.FileBackingInfo):
+                    d['disk_mode'] = backing.diskMode
+                    d['content_id'] = backing.contentId
+                    d['sharing'] = backing.sharing == 'sharingMultiWriter'
+                    d['file_name'] = backing.fileName
             # Controller
             if hasattr(dev, 'busNumber'):
                 d['bus_number'] = dev.busNumber
@@ -331,16 +348,35 @@ class VSphereNodeDriver(NodeDriver):
     def ex_get_node_by_uuid(self, uuid):
         return self._to_node(self.ex_get_vm(uuid))
 
-    def _to_volume(self, disk):
+    def _to_volume(self, *disks):
         """
-        Creates StorageVolume object from disk dictionary.
+        Creates :class:`StorageVolume` object from disk dictionary.
 
-        :param dict disk: dict in format that _get_vm_disks() returns.
+        :param tuple[dict] disks: dict in format that :meth:`self._get_vm_disks` returns.
 
         :returns StorageVolume: Storage volume object
         """
-        return StorageVolume(id=disk['device']['key'],
-                             name=disk['label'],
-                             size=int(disk['capacity']),
-                             driver=self,
-                             extra=disk)
+        if not disks:
+            raise ValueError("Disk(s) parameter must be provided")
+        elif len(disks) > 1 and not all(disk['device']['sharing'] is True for disk in disks):
+            disks_ids = [disk['device']['disk_object_id'] for disk in disks]
+            raise LibcloudError((
+                "Unable to create StorageVolume from multiple non-shared "
+                "disks: {}."
+            ).format(', '.join(disks_ids)))
+
+        main_disk = disks[0]
+        volume_id = main_disk['device']['key']
+        name = main_disk['label']
+        size = int(main_disk['capacity'])
+        extra = {
+            key: value for key, value in main_disk.items()
+            if key != 'device'}
+        extra['devices'] = [disk['device'] for disk in disks]
+
+        return StorageVolume(
+            id=volume_id,
+            name=name,
+            size=size,
+            driver=self,
+            extra=extra)
