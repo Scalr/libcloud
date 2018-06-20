@@ -364,7 +364,8 @@ class VSphereNodeDriver(NodeDriver):
 
     def _walk_folder(self, folder):
         """
-        Recursively walks the specified folder and return a list of all sub-folders found.
+        Recursively walks the specified folder and return a flat list of
+        all files found.
 
         :type folder: :class:`vim.Folder`
         :rtype: list
