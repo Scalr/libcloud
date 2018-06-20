@@ -18,6 +18,7 @@ VMware vSphere driver using pyvmomi - https://github.com/vmware/pyvmomi
 """
 
 import atexit
+import collections
 import ipaddress
 import re
 import ssl
@@ -53,6 +54,7 @@ __all__ = [
 
 
 DEFAULT_CONNECTION_TIMEOUT = 5  # default connection timeout in seconds
+DEFAULT_PAGE_SIZE = 1000
 
 
 class VSphereConnection(ConnectionUserAndKey):
@@ -155,9 +157,9 @@ class VSphereNodeDriver(NodeDriver):
             is_template=False)
         nodes = [self._to_node(vm) for vm in virtual_machines]
 
-        creation_dates = self._query_nodes_creation_dates()
+        creation_times = self._query_node_creation_times()
         for node in nodes:
-            node.extra['create_time'] = creation_dates.get(node.id)
+            node.created_at = creation_times.get(node.id)
 
         return nodes
 
@@ -170,10 +172,10 @@ class VSphereNodeDriver(NodeDriver):
             is_template=True)
         images = [self._to_image(vm_image) for vm_image in virtual_machines]
 
-        creation_dates = self._query_nodes_creation_dates()
+        creation_times = self._query_node_creation_times()
         for image in images:
             image_id = image.extra['managed_object_id']
-            image.extra['create_time'] = creation_dates.get(image_id)
+            image.extra['created_at'] = creation_times.get(image_id)
 
         return images
 
@@ -181,10 +183,10 @@ class VSphereNodeDriver(NodeDriver):
         """
         List available volumes (on all datastores).
         """
-        if node is not None:
-            virtual_machines = [self.ex_get_vm(node)]
-        else:
+        if node is None:
             virtual_machines = self._list_virtual_machines()
+        else:
+            virtual_machines = [self.ex_get_vm(node)]
 
         volumes = []
         for vm in virtual_machines:
@@ -193,11 +195,11 @@ class VSphereNodeDriver(NodeDriver):
                 for prop in self._get_vm_virtual_disks_properties(vm)])
 
         filter_by_vm = virtual_machines[0] if node is not None else None
-        creation_dates = self._query_volumes_creation_dates(
+        creation_times = self._query_volume_creation_times(
             volumes, virtual_machine=filter_by_vm)
         for volume in volumes:
             device_id = volume.extra['device']['disk_object_id']
-            volume.extra['create_time'] = creation_dates.get(device_id)
+            volume.extra['created_at'] = creation_times.get(device_id)
 
         return volumes
 
@@ -205,11 +207,12 @@ class VSphereNodeDriver(NodeDriver):
         """
         List available snapshots.
         """
-        snapshots = []
-        virtual_machines = [
-            self.ex_get_vm(node)
-        ] if node is not None else self._list_virtual_machines()
+        if node is None:
+            virtual_machines = self._list_virtual_machines()
+        else:
+            virtual_machines = [self.ex_get_vm(node)]
 
+        snapshots = []
         for vm in virtual_machines:
             snapshot_info = vm.snapshot
             if not isinstance(snapshot_info, vim.vm.SnapshotInfo):
@@ -232,7 +235,7 @@ class VSphereNodeDriver(NodeDriver):
                 snapshot_data.extend(self._walk_snapshot_tree(child_tree))
         return snapshot_data
 
-    def _query_nodes_creation_dates(self, virtual_machine=None):
+    def _query_node_creation_times(self, virtual_machine=None):
         """
         Fetches the creation dates of the VMs from the event history.
 
@@ -251,7 +254,7 @@ class VSphereNodeDriver(NodeDriver):
             event.vm.vm._GetMoId(): event.createdTime
             for event in created_events}
 
-    def _query_volumes_creation_dates(self, volumes, virtual_machine=None):
+    def _query_volume_creation_times(self, volumes, virtual_machine=None):
         """
         Fetches the creation dates of the volumes from the event history.
 
@@ -262,18 +265,17 @@ class VSphereNodeDriver(NodeDriver):
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
             entity=virtual_machine,
-            system_user=True,
         )  # type: list[vim.Event]
 
-        nodes_creation_dates = self._query_nodes_creation_dates(
+        node_creation_times = self._query_node_creation_times(
             virtual_machine=virtual_machine,
         )  # type: list[vim.Event]
 
         datastores_info = [
             datastore.info for datastore in self._list_datastores()
         ]  # type: list[vim.host.VmfsDatastoreInfo]
-        creation_dates = {}  # type: dict[str, datetime.datetime]
-        extra_volumes_files = {} # type: dict[str, str]
+        creation_times = {}  # type: dict[str, datetime.datetime]
+        extra_volumes_files = collections.defaultdict(list)  # type: dict[str, list]
 
         for volume in volumes:
             device = volume.extra['device']
@@ -286,9 +288,11 @@ class VSphereNodeDriver(NodeDriver):
             # SCSI controller 0 at bus node (0:0).
             # By default, the SCSI controller is assigned to virtual device
             # node (z:7).
-            if device['scsi_unit_number'] == 7 and device['scsi_bus_number'] == 0:
+            if device['scsi_unit_number'] == 7 \
+                    and device['unit_number'] == 0 \
+                    and device['scsi_bus_number'] == 0:
                 cloud_instance_id = volume.extra['owner_id']
-                creation_dates[device_id] = nodes_creation_dates.get(cloud_instance_id)
+                creation_times[device_id] = node_creation_times.get(cloud_instance_id)
                 continue
 
             # 2. Extra volume
@@ -296,25 +300,25 @@ class VSphereNodeDriver(NodeDriver):
                 volume_file_path = self._file_name_to_path(
                     volume_file['name'],
                     datastores_info=datastores_info)
-                extra_volumes_files[volume_file_path] = device_id
+                extra_volumes_files[device_id].append(volume_file_path)
 
         # Search for timestamps of the extra volumes (2)
         for event in reconfigure_events:  # lazy iterator with API pagination
-            reconfigured_devices = [
-                change.device for change in event.configSpec.deviceChange
+            created_files = [
+                change.device.backing.fileName
+                for change in event.configSpec.deviceChange
                 if isinstance(change.device, vim.vm.device.VirtualDisk) \
                     and change.operation == 'add' \
                     and change.fileOperation == 'create']
 
-            for device in reconfigured_devices:
-                attached_file = device.backing.fileName
-                if attached_file in extra_volumes_files:
-                    device_id = extra_volumes_files[attached_file]
-                    creation_dates[device_id] = event.createdTime
-            if len(creation_dates) == len(volumes):
-                break
+            for created_file in created_files:
+                volume_device_ids = {
+                    id_ for id_, volume_files in extra_volumes_files.items()
+                    if created_file in volume_files}
+                for device_id in volume_device_ids:
+                    creation_times[device_id] = event.createdTime
 
-        return creation_dates
+        return creation_times
 
     def ex_get_vm(self, node_or_uuid):
         """
@@ -360,7 +364,7 @@ class VSphereNodeDriver(NodeDriver):
 
     def _walk_folder(self, folder):
         """
-        Recursively walks the specified folder.
+        Recursively walks the specified folder and return a list of all sub-folders found.
 
         :type folder: :class:`vim.Folder`
         :rtype: list
@@ -494,14 +498,14 @@ class VSphereNodeDriver(NodeDriver):
         content = self._retrieve_content()
         history_collector = content.eventManager.CreateCollectorForEvents(
             filter_spec)  # type: vim.event.EventHistoryCollector
-        history_collector.SetCollectorPageSize(1000)
+        history_collector.SetCollectorPageSize(DEFAULT_PAGE_SIZE)
         history_collector.ResetCollector()
 
         events = history_collector.latestPage
         while events:
             for event in events:
                 yield event
-            events = history_collector.ReadPreviousEvents(1000)
+            events = history_collector.ReadPreviousEvents(DEFAULT_PAGE_SIZE)
 
     def _get_vm_virtual_disks_properties(self, virtual_machine):
         """
@@ -681,7 +685,7 @@ class VSphereNodeDriver(NodeDriver):
         extra = {
             'name': snapshot_tree.name,
             'description': snapshot_tree.description,
-            'create_time': snapshot_tree.createTime,
+            'created_at': snapshot_tree.createTime,
             'quiesced': snapshot_tree.quiesced,
             'backup_manifest': snapshot_tree.backupManifest,
             'replay_supported': snapshot_tree.replaySupported,
