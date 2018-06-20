@@ -160,7 +160,7 @@ class VSphereNodeDriver(NodeDriver):
                 grouped_vm_disks[backing_file].append(vm_disk)
 
         return [
-            self._to_volume(*vm_disks)
+            self._to_volume(vm_disks)
             for vm_disks in grouped_vm_disks.values()]
 
     def ex_get_vm(self, node_or_uuid):
@@ -308,6 +308,7 @@ class VSphereNodeDriver(NodeDriver):
         if not virtual_machine.layoutEx:
             return []
 
+        cloud_instance_id = virtual_machine._GetMoId()
         files = {}
         for file_info in virtual_machine.layoutEx.file:
             files[file_info.key] = {
@@ -342,22 +343,24 @@ class VSphereNodeDriver(NodeDriver):
                 'committed': int(committed / 1024),
                 'descriptor': descriptor,
                 'label': device['label'],
+                'owner_id': cloud_instance_id,
             })
         return disks
 
     def ex_get_node_by_uuid(self, uuid):
         return self._to_node(self.ex_get_vm(uuid))
 
-    def _to_volume(self, *disks):
+    def _to_volume(self, disks):
         """
         Creates :class:`StorageVolume` object from disk dictionary.
 
-        :param tuple[dict] disks: dict in format that :meth:`self._get_vm_disks` returns.
+        :param disks: dict(s) in format that :meth:`self._get_vm_disks` returns.
+        :type disks: dict | list[dict]
 
         :returns StorageVolume: Storage volume object
         """
-        if not disks:
-            raise ValueError("Disk(s) parameter must be provided")
+        if isinstance(disks, dict):
+            disks = [disks]
         elif len(disks) > 1 and not all(disk['device']['sharing'] is True for disk in disks):
             disks_ids = [disk['device']['disk_object_id'] for disk in disks]
             raise LibcloudError((
@@ -369,10 +372,13 @@ class VSphereNodeDriver(NodeDriver):
         volume_id = main_disk['device']['key']
         name = main_disk['label']
         size = int(main_disk['capacity'])
+
         extra = {
             key: value for key, value in main_disk.items()
             if key != 'device'}
-        extra['devices'] = [disk['device'] for disk in disks]
+        extra['devices'] = collections.defaultdict(list)
+        for disk in disks:
+            extra['devices'][disk['owner_id']].append(disk['device'])
 
         return StorageVolume(
             id=volume_id,
