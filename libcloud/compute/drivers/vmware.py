@@ -19,6 +19,7 @@ VMware vSphere driver using pyvmomi - https://github.com/vmware/pyvmomi
 
 import atexit
 import ipaddress
+import time
 import ssl
 try:
     import urlparse
@@ -27,7 +28,9 @@ except ImportError:
 
 try:
     from pyVim import connect
+    from pyVim import task as vmware_task
     from pyVmomi import vmodl
+    from pyVmomi import vim
 except ImportError:
     raise ImportError('Missing "pyvmomi" dependency. You can install it '
                       'using pip - pip install pyvmomi')
@@ -344,3 +347,90 @@ class VSphereNodeDriver(NodeDriver):
                              size=int(disk['capacity']),
                              driver=self,
                              extra=disk)
+
+    def list_volumes_(self):
+        self._file_query()
+        return
+
+        files = []  # type: list[vim.host.DatastoreBrowser.VmDiskInfo]
+        for dc in content.rootFolder.childEntity:
+            for ds in dc.datastore:
+                print(dc, ds)
+                search_task =  ds.browser.SearchSubFolders("[%s]" % ds.name, search_spec)
+
+                print('wait...')
+                vmware_task.WaitForTask(search_task)
+                # vim.host.DatastoreBrowser.SearchResults
+
+                for result in search_task.info.result:
+                    # type: vim.host.DatastoreBrowser.FileInfo
+                    for f in result.file:
+                        files.append({
+                            'path': '{}/{}'.format(result.folderPath, f.path),
+                            'size': f.fileSize,
+                            'modification': f.modification,
+                            'owner': f.owner,
+                        })
+                break
+            break
+
+        print(len(files))
+        for f in files:
+            print(f)
+
+    def _file_query(self):
+        """
+
+        :param details: This object comprises a set of booleans that describe 
+            what details to return for each file. The file level details apply
+            globally to all matched files.
+
+        :param sort_folders_first: By default, files are sorted in alphabetical
+            order regardless of file type. If this flag is set to ``True``,
+            folders are placed at the start of the list of results in 
+            alphabetical order. The remaining files follow in alphabetical 
+            order.
+        :type sort_folders_first: bool
+
+        See:
+         - https://pubs.vmware.com/vsphere-51/topic/com.vmware.wssdk.apiref.doc/vim.host.DatastoreBrowser.SearchSpec.html
+        """
+        content = self.connection.client.RetrieveContent()
+
+        filter_query_flags = vim.FileQueryFlags(
+            fileSize=True,
+            fileType=True,
+            fileOwner=False,
+            modification=True)
+
+        search_spec = vim.HostDatastoreBrowserSearchSpec(
+            query=[vim.VmDiskFileQuery()], # VmSnapshotFileQuery
+            details=filter_query_flags,
+            sortFoldersFirst=True
+        )
+        # FileQuery
+
+        files = []  # type: list[vim.host.DatastoreBrowser.VmDiskInfo]
+
+        def run(d):
+            print('runnung...')
+            print(d.SearchDatastoreSubFolders)
+
+            # return datastore.browser.SearchSubFolders("[%s]" % datastore.name, search_spec)
+
+        pages = False
+        tasks = (
+            run(datacenter)
+            for datacenter in content.rootFolder.childEntity
+            for datastore in datacenter.datastore
+        )  # Task for each datastore
+
+        if pages:
+            # runs all tasks at one time
+            tasks = tuple(tasks)
+
+        # for task in tasks:
+        #     print('wait...')
+        #     vmware_task.WaitForTask(task, raiseOnError=True)
+
+        # task.info.result
