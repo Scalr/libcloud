@@ -188,18 +188,27 @@ class VSphereNodeDriver(NodeDriver):
         else:
             virtual_machines = [self.ex_get_vm(node)]
 
-        volumes = []
+        # grouping vm's disks by unique backing-file name
+        grouped_vm_disks = collections.defaultdict(list)
         for vm in virtual_machines:
-            volumes.extend([
-                self._to_volume(prop)
-                for prop in self._get_vm_virtual_disks_properties(vm)])
+            for vm_disk in self._get_vm_virtual_disks_properties(vm):
+                backing_file = vm_disk['device']['file_name']
+                grouped_vm_disks[backing_file].append(vm_disk)
 
-        filter_by_vm = virtual_machines[0] if node is not None else None
+        datastores_info = [
+            datastore.info for datastore in self._list_datastores()
+        ]  # type: list[vim.host.VmfsDatastoreInfo]
+        volumes = [
+            self._to_volume(vm_disks, datastores_info)
+            for vm_disks in grouped_vm_disks.values()]
+
+        # update volume creation timestamps
+        vm_entity = virtual_machines[0] if len(virtual_machines) == 1 else None
         creation_times = self._query_volume_creation_times(
-            volumes, virtual_machine=filter_by_vm)
+            volumes, virtual_machine=vm_entity)
         for volume in volumes:
-            device_id = volume.extra['device']['disk_object_id']
-            volume.extra['created_at'] = creation_times.get(device_id)
+            volume_file = volume.extra['file_path']
+            volume.extra['created_at'] = creation_times.get(volume_file)
 
         return volumes
 
@@ -267,58 +276,44 @@ class VSphereNodeDriver(NodeDriver):
             entity=virtual_machine,
         )  # type: list[vim.Event]
 
+        volume_creation_times = {}  # type: dict[str, datetime.datetime]
         node_creation_times = self._query_node_creation_times(
             virtual_machine=virtual_machine,
         )  # type: list[vim.Event]
 
-        datastores_info = [
-            datastore.info for datastore in self._list_datastores()
-        ]  # type: list[vim.host.VmfsDatastoreInfo]
-        creation_times = {}  # type: dict[str, datetime.datetime]
-        extra_volumes_files = collections.defaultdict(list)  # type: dict[str, list]
-
+        # 1. Root volumes
+        #
+        # The default SCSI controller is numbered as 0. When you create a
+        # virtual machine, the default hard disk is assigned to the default
+        # SCSI controller 0 at bus node (0:0).
+        # By default, the SCSI controller is assigned to virtual device
+        # node (z:7).
         for volume in volumes:
-            device = volume.extra['device']
-            device_id = device['disk_object_id']
+            volume_file = volume.extra['file_path']
+            for node_id, node_devices in volume.extra['devices'].items():
+                for device in node_devices:
+                    if device['scsi_unit_number'] == 7 \
+                            and device['unit_number'] == 0 \
+                            and device['scsi_bus_number'] == 0:
+                        volume_creation_times[volume_file] = node_creation_times.get(node_id)
+                        continue
 
-            # 1. Root volume
-            #
-            # The default SCSI controller is numbered as 0. When you create a
-            # virtual machine, the default hard disk is assigned to the default
-            # SCSI controller 0 at bus node (0:0).
-            # By default, the SCSI controller is assigned to virtual device
-            # node (z:7).
-            if device['scsi_unit_number'] == 7 \
-                    and device['unit_number'] == 0 \
-                    and device['scsi_bus_number'] == 0:
-                cloud_instance_id = volume.extra['owner_id']
-                creation_times[device_id] = node_creation_times.get(cloud_instance_id)
-                continue
-
-            # 2. Extra volume
-            for volume_file in volume.extra['files']:
-                volume_file_path = self._file_name_to_path(
-                    volume_file['name'],
-                    datastores_info=datastores_info)
-                extra_volumes_files[device_id].append(volume_file_path)
-
-        # Search for timestamps of the extra volumes (2)
+        # 2. Extra volumes
         for event in reconfigure_events:  # lazy iterator with API pagination
-            created_files = [
+            created_files = (
                 change.device.backing.fileName
                 for change in event.configSpec.deviceChange
                 if isinstance(change.device, vim.vm.device.VirtualDisk) \
                     and change.operation == 'add' \
-                    and change.fileOperation == 'create']
+                    and change.fileOperation == 'create')
 
             for created_file in created_files:
-                volume_device_ids = {
-                    id_ for id_, volume_files in extra_volumes_files.items()
-                    if created_file in volume_files}
-                for device_id in volume_device_ids:
-                    creation_times[device_id] = event.createdTime
+                volume_creation_times.update({
+                    volume.extra['file_path']: event.createdTime
+                    for volume in volumes
+                    if volume.extra['file_path'] == created_file})
 
-        return creation_times
+        return volume_creation_times
 
     def ex_get_vm(self, node_or_uuid):
         """
@@ -550,6 +545,11 @@ class VSphereNodeDriver(NodeDriver):
             if device.deviceInfo:
                 virtual_disk['label'] = device.deviceInfo.label
                 virtual_disk['summary'] = device.deviceInfo.summary
+            backing = device.backing
+            if isinstance(backing, vim.vm.device.VirtualDevice.FileBackingInfo):
+                virtual_disk['disk_mode'] = backing.diskMode
+                virtual_disk['sharing'] = backing.sharing == 'sharingMultiWriter'
+                virtual_disk['file_name'] = backing.fileName
             devices[device.key] = virtual_disk
         for scsi_controller in vm_virtual_scsi_controllers:
             for device_key in scsi_controller.device:
@@ -575,6 +575,8 @@ class VSphereNodeDriver(NodeDriver):
             descriptor = None
             for chain in getattr(disk_info, 'chain', ()):
                 for file_key in chain.fileKey:
+                    if file_key not in files:
+                        continue
                     f = files[file_key]
                     disk_files.append(f)
                     if f['type'] == 'diskExtent':
@@ -651,22 +653,46 @@ class VSphereNodeDriver(NodeDriver):
             extra=extra)
         return node
 
-    def _to_volume(self, disk_properties):
+    def _to_volume(self, disks, datastores_info):
         """
         Creates :class:`StorageVolume` object from disk properties.
 
         :param dict disk_properties: dict in format that
             :meth:`self._get_vm_virtual_disks_properties` returns.
 
-        :returns StorageVolume: Storage volume object
+        :param disks: dict(s) in format that :meth:`self._get_vm_disks` returns.
+        :type disks: dict | list[dict]
         """
+        if isinstance(disks, dict):
+            disks = [disks]
+        elif len(disks) > 1 and not all(disk['device']['sharing'] is True for disk in disks):
+            disks_ids = [disk['device']['disk_object_id'] for disk in disks]
+            raise LibcloudError((
+                "Unable to create StorageVolume from multiple non-shared "
+                "disks: {}."
+            ).format(', '.join(disks_ids)))
+
+        main_disk = disks[0]
+        volume_id = main_disk['device']['key']
+        name = main_disk['label']
+        size = int(main_disk['capacity'])
+
+        extra = {
+            key: value for key, value in main_disk.items()
+            if key != 'device'}
+        extra['file_path'] = self._file_name_to_path(
+            main_disk['device']['file_name'],
+            datastores_info=datastores_info)
+        extra['devices'] = collections.defaultdict(list)
+        for disk in disks:
+            extra['devices'][disk['owner_id']].append(disk['device'])
+
         return StorageVolume(
-            # XXX: use disk_properties['device']['disk_object_id'] instead
-            id=disk_properties['device']['key'],
-            name=disk_properties['label'],
-            size=int(disk_properties['capacity']),
+            id=volume_id,
+            name=name,
+            size=size,
             driver=self,
-            extra=disk_properties)
+            extra=extra)
 
     def _to_snapshot(self, snapshot_tree):
         """
