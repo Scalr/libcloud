@@ -25,9 +25,10 @@ except ImportError:
 import mock
 import requests_mock
 
-from libcloud.common.base import LazyObject
 from libcloud.common.base import XmlResponse
 from libcloud.common.types import MalformedResponseError
+from libcloud.common.base import LazyObject, Response
+from libcloud.common.exceptions import BaseHTTPError, RateLimitReachedError
 from libcloud.test import LibcloudTestCase
 
 
@@ -97,6 +98,56 @@ class XmlResponseTest(unittest.TestCase):
 
             with self.assertRaises(MalformedResponseError):
                 response.parse_error()
+
+
+class ErrorResponseTest(LibcloudTestCase):
+    def mock_response(self, code, headers={}):
+        m = mock.MagicMock()
+        m.request = mock.Mock()
+        m.headers = headers
+        m.status_code = code
+        m.text = None
+        return m
+
+    def test_rate_limit_response(self):
+        resp_mock = self.mock_response(429, {'Retry-After': '120'})
+        try:
+            Response(resp_mock, mock.MagicMock())
+        except RateLimitReachedError as e:
+            self.assertEqual(e.retry_after, 120)
+        except:
+            # We should have got a RateLimitReachedError
+            self.fail("Catched exception should have been RateLimitReachedError")
+        else:
+            # We should have got an exception
+            self.fail("HTTP Status 429 response didn't raised an exception")
+
+    def test_error_with_retry_after(self):
+        # 503 Service Unavailable may include Retry-After header
+        resp_mock = self.mock_response(503, {'Retry-After': '300'})
+        try:
+            Response(resp_mock, mock.MagicMock())
+        except BaseHTTPError as e:
+            self.assertIn('retry-after', e.headers)
+            self.assertEqual(e.headers['retry-after'], '300')
+        else:
+            # We should have got an exception
+            self.fail("HTTP Status 503 response didn't raised an exception")
+
+    @mock.patch('time.time', return_value=1231006505)
+    def test_error_with_retry_after_http_date_format(self, time_mock):
+        retry_after = 'Sat, 03 Jan 2009 18:20:05 -0000'
+        # 503 Service Unavailable may include Retry-After header
+        resp_mock = self.mock_response(503, {'Retry-After': retry_after})
+        try:
+            Response(resp_mock, mock.MagicMock())
+        except BaseHTTPError as e:
+            self.assertIn('retry-after', e.headers)
+            # HTTP-date got translated to delay-secs
+            self.assertEqual(e.headers['retry-after'], '300')
+        else:
+            # We should have got an exception
+            self.fail("HTTP Status 503 response didn't raised an exception")
 
 
 if __name__ == '__main__':

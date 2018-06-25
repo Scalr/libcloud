@@ -330,10 +330,12 @@ class EC2Tests(LibcloudTestCase, TestCaseMixin):
 
     def test_authorize_security_group_ingress(self):
         ranges = ['1.1.1.1/32', '2.2.2.2/32']
-        resp = self.driver.ex_authorize_security_group_ingress('sg-42916629', 22, 22, cidr_ips=ranges)
+        description = "automated authorised IP ingress test"
+        resp = self.driver.ex_authorize_security_group_ingress('sg-42916629', 22, 22, cidr_ips=ranges, description=description)
         self.assertTrue(resp)
         groups = [{'group_id': 'sg-949265ff'}]
-        resp = self.driver.ex_authorize_security_group_ingress('sg-42916629', 22, 23, group_pairs=groups)
+        description = "automated authorised group ingress test"
+        resp = self.driver.ex_authorize_security_group_ingress('sg-42916629', 22, 23, group_pairs=groups, description=description)
         self.assertTrue(resp)
 
     def test_authorize_security_group_egress(self):
@@ -449,21 +451,21 @@ class EC2Tests(LibcloudTestCase, TestCaseMixin):
                 self.assertTrue('m2.4xlarge' in ids)
 
             if region_name == 'us-east-1':
-                self.assertEqual(len(sizes), 72)
+                self.assertEqual(len(sizes), 84)
                 self.assertTrue('cg1.4xlarge' in ids)
                 self.assertTrue('cc2.8xlarge' in ids)
                 self.assertTrue('cr1.8xlarge' in ids)
                 self.assertTrue('x1.32xlarge' in ids)
             elif region_name == 'us-west-1':
-                self.assertEqual(len(sizes), 61)
+                self.assertEqual(len(sizes), 67)
             if region_name == 'us-west-2':
-                self.assertEqual(len(sizes), 73)
+                self.assertEqual(len(sizes), 79)
             elif region_name == 'ap-southeast-1':
                 self.assertEqual(len(sizes), 59)
             elif region_name == 'ap-southeast-2':
                 self.assertEqual(len(sizes), 63)
             elif region_name == 'eu-west-1':
-                self.assertEqual(len(sizes), 70)
+                self.assertEqual(len(sizes), 82)
             elif region_name == 'ap-south-1':
                 self.assertEqual(len(sizes), 41)
 
