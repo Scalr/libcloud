@@ -31,6 +31,7 @@ except ImportError:
 try:
     from pyVim import connect
     from pyVmomi import vim
+    from pyVmomi import vmodl
 except ImportError:
     raise ImportError('Missing "pyvmomi" dependency. You can install it '
                       'using pip - pip install pyvmomi')
@@ -212,23 +213,30 @@ class VSphereNodeDriver(NodeDriver):
 
         return volumes
 
-    def list_snapshots(self, node=None):
+    def list_snapshots(self):
         """
         List available snapshots.
         """
-        if node is None:
-            virtual_machines = self._list_virtual_machines()
-        else:
-            virtual_machines = [self.ex_get_vm(node)]
-
+        path_set = [
+            'snapshot.rootSnapshotList',
+            'layoutEx.snapshot',
+            'layoutEx.file']
         snapshots = []
-        for vm in virtual_machines:
-            snapshot_info = vm.snapshot
-            if not isinstance(snapshot_info, vim.vm.SnapshotInfo):
+
+        for props in self._query_vm_properties(path_set=path_set).values():
+            snapshot_tree = props.get('snapshot.rootSnapshotList')
+            snapshot_layout = props.get('layoutEx.snapshot')
+            file_layout = props.get('layoutEx.file')
+
+            if not snapshot_tree:
                 continue
-            snapshots.extend(
-                self._walk_snapshot_tree(snapshot_info.rootSnapshotList))
-        return [self._to_snapshot(item) for item in snapshots]
+            snapshots.extend([
+                self._to_snapshot(
+                    item,
+                    snapshot_layout=snapshot_layout,
+                    file_layout=file_layout)
+                for item in self._walk_snapshot_tree(snapshot_tree)])
+        return snapshots
 
     def _walk_snapshot_tree(self, snapshot_tree):
         """
@@ -694,7 +702,11 @@ class VSphereNodeDriver(NodeDriver):
             driver=self,
             extra=extra)
 
-    def _to_snapshot(self, snapshot_tree):
+    def _to_snapshot(
+            self,
+            snapshot_tree,
+            snapshot_layout=None,
+            file_layout=None):
         """
         Creates :class:`VolumeSnapshot` object from disk snapshot tree.
 
@@ -702,13 +714,13 @@ class VSphereNodeDriver(NodeDriver):
           - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.SnapshotTree.html
           - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.Snapshot.html
 
-        :type snapshot: :class:`vim.vm.SnapshotTree`
+        :type snapshot_tree: :class:`vim.vm.SnapshotTree`
+        :type snapshot_layout: :class:`vim.vm.FileLayoutEx.SnapshotLayout`
+        :type file_layout: :class:`vim.vm.FileLayoutEx.FileInfo`
 
         :returns: Storage volume snapthot.
         :rtype: :class:`VolumeSnapshot`
         """
-        layout = snapshot_tree.vm.layoutEx
-        snapshot = snapshot_tree.snapshot
         extra = {
             'name': snapshot_tree.name,
             'description': snapshot_tree.description,
@@ -716,15 +728,22 @@ class VSphereNodeDriver(NodeDriver):
             'quiesced': snapshot_tree.quiesced,
             'backup_manifest': snapshot_tree.backupManifest,
             'replay_supported': snapshot_tree.replaySupported,
-            'state': snapshot_tree.state,  # the power state of the virtual machine
+            'owner_state': snapshot_tree.state,
+            # pylint: disable=protected-access
+            'owner_id': snapshot_tree.vm._GetMoId()
         }
-        snapshot_data_keys = [
-            item.dataKey for item in layout.snapshot
-            if item.key == snapshot]
-        capacity_in_kb = sum(
-            disk.size for disk in layout.file
-            if disk.key in snapshot_data_keys and disk.type == 'snapshotData'
-        ) / 1024.0
+
+        if snapshot_layout is None or file_layout is None:
+            capacity_in_kb = None
+        else:
+            snapshot = snapshot_tree.snapshot
+            snapshot_data_keys = [
+                item.dataKey for item in snapshot_layout
+                if item.key == snapshot]
+            capacity_in_kb = sum(
+                disk.size for disk in file_layout
+                if disk.key in snapshot_data_keys and disk.type == 'snapshotData'
+            ) / 1024.0
 
         return VolumeSnapshot(
             id=snapshot_tree.id,
@@ -745,3 +764,79 @@ class VSphereNodeDriver(NodeDriver):
                 'managed_object_id': virtual_machine._GetMoId(),
             },
             driver=self)
+
+    def _query_vm_properties(self, path_set):
+        if not path_set:
+            raise ValueError("Empty path_set is specified")
+
+        content = self._retrieve_content()
+        object_type = vim.VirtualMachine
+
+        container_view = content.viewManager.CreateContainerView(
+            container=content.rootFolder,
+            type=[object_type],
+            recursive=True,
+        )  # type: vim.view.ContainerView
+
+        return self._query_properties(
+            container_view,
+            object_type,
+            path_set=path_set)
+
+    def _query_properties(self, view, object_type, path_set):
+        """
+        Collect properties for managed objects from a managed view.
+
+        See:
+         - http://pubs.vmware.com/vsphere-50/index.jsp#com.vmware.wssdk.pg.doc_50/PG_Ch5_PropertyCollector.7.2.html
+
+        :param view: Starting point of inventory navigation.
+        :type view: :class:`vim.view.ManagedObjectView`
+
+        :param object_type: Type of managed object.
+        :type object_type: :class:`vim.ManagedEntity`
+
+        :param path_set: List of properties to retrieve.
+        :type path_set: list
+
+        :return: A list of properties for the managed objects.
+        :rtype: list[dict]
+        """
+        if not path_set:
+            raise ValueError("Empty path_set is specified")
+
+        content = self._retrieve_content()
+        collector = content.propertyCollector
+
+        # Create a traversal specification to identify the path for
+        # collection
+        traversal_spec = vmodl.query.PropertyCollector.TraversalSpec(
+            name='traverseEntities',
+            path='view',
+            skip=False,
+            type=view.__class__)
+
+        # Create object specification to define the starting point of
+        # inventory navigation
+        object_spec = vmodl.query.PropertyCollector.ObjectSpec(
+            obj=view,
+            skip=True,
+            selectSet=[traversal_spec])
+
+        # Identify the properties to the retrieved
+        property_spec = vmodl.query.PropertyCollector.PropertySpec(
+            type=object_type,
+            pathSet=path_set)
+
+        # Add the object and property specification to the property
+        # filter specification
+        filter_spec = vmodl.query.PropertyCollector.FilterSpec(
+            objectSet=[object_spec],
+            propSet=[property_spec])
+
+        # Retrieve properties
+        properties = collector.RetrieveContents([filter_spec])
+
+        return {
+            prop.obj: {prop.name: prop.val for prop in prop.propSet}
+            for prop in properties}
