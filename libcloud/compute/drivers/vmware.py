@@ -786,8 +786,9 @@ class VSphereNodeDriver(NodeDriver):
 
         The extra dict format:
          - file_path: ``str``
-         - devices: ``dict[str, list[dict]]``
+         - last_modified: ``None`` | :class:`datetime.datetime`
          - created_at: ``None`` | :class:`datetime.datetime`
+         - devices: ``dict[str, list[dict]]``
 
         :param file_info: The VMDK file.
         :type file_info: :class:`_FileInfo`.
@@ -807,8 +808,9 @@ class VSphereNodeDriver(NodeDriver):
 
         extra = {
             'file_path': file_info.path,
-            'devices': collections.defaultdict(list),
+            'last_modified': file_info.modification,
             'created_at': None,
+            'devices': collections.defaultdict(list),
         }
         for device in devices:
             extra['devices'][device.owner_id].append(device.__dict__)
