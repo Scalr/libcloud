@@ -2236,6 +2236,33 @@ class GCENodeDriver(NodeDriver):
                     image_list.append(self._to_node_image(img))
             return image_list
 
+        def images_requester(project):
+            saved_request_path = self.connection.request_path
+
+            # Override the connection request path
+            self.connection.request_path = saved_request_path.replace(
+                self.project,
+                project)
+            try:
+                return self.connection.request(request,
+                                               method='GET')
+            finally:
+                # Restore the connection request_path
+                self.connection.request_path = saved_request_path
+
+        image_paginator = None
+
+        if isinstance(ex_project, str):
+            image_paginator = GCEList(
+                self,
+                images_requester,
+                (ex_project,),
+                {},
+                page_size=ex_page_size,
+                split_fn=images_splitter)
+
+            return image_paginator
+
         if ex_project is None:
             image_paginator = GCEList(
                 self,
@@ -2244,39 +2271,20 @@ class GCENodeDriver(NodeDriver):
                 {'method': 'GET'},
                 page_size=ex_page_size,
                 split_fn=images_splitter)
-        else:
-            def images_requester(project):
-                save_request_path = self.connection.request_path
+            ex_project = list(self.IMAGE_PROJECTS.keys())
 
-                # Override the connection request path
-                self.connection.request_path = save_request_path.replace(
-                    self.project,
-                    project)
-                try:
-                    return self.connection.request(request,
-                                                   method='GET')
-                finally:
-                    # Restore the connection request_path
-                    self.connection.request_path = save_request_path
+        multi_lists = [GCEList(
+            self,
+            images_requester,
+            (proj,),
+            {},
+            page_size=ex_page_size,
+            split_fn=images_splitter) for proj in ex_project]
 
-            if isinstance(ex_project, str):
-                image_paginator = GCEList(
-                    self,
-                    images_requester,
-                    (ex_project,),
-                    {},
-                    page_size=ex_page_size,
-                    split_fn=images_splitter)
-            else:
-                multi_lists = [GCEList(
-                    self,
-                    images_requester,
-                    (proj,),
-                    {},
-                    page_size=ex_page_size,
-                    split_fn=images_splitter) for proj in ex_project]
+        if image_paginator:
+            multi_lists.insert(0, image_paginator)
 
-                image_paginator = sum(multi_lists, misc_utils.EmptyPageList())
+        image_paginator = sum(multi_lists, misc_utils.EmptyPageList())
 
         return image_paginator
 
@@ -2523,7 +2531,7 @@ class GCENodeDriver(NodeDriver):
             {'method': 'GET'},
             page_size=ex_page_size,
             split_fn=lambda resp:
-                [self.to_snapshot(s) for s in resp.object.get('items', [])])
+                [self._to_snapshot(s) for s in resp.object.get('items', [])])
         return snapshot_paginator
 
     def ex_list_targethttpproxies(self):
@@ -7685,19 +7693,18 @@ class GCENodeDriver(NodeDriver):
                   if no matching image is found.
         :rtype:   :class:`GCENodeImage` or ``None``
         """
-        project_images_list = GCEList(
-            self, self.list_images, ex_project=project,
+        project_images_list = self.iterate_images(
+            ex_project=project,
             ex_include_deprecated=True)
         partial_match = []
-        for page in project_images_list.page():
-            for image in page:
-                if image.name == partial_name:
-                    return image
-                if image.name.startswith(partial_name):
-                    ts = timestamp_to_datetime(
-                        image.extra['creationTimestamp'])
-                    if not partial_match or partial_match[0] < ts:
-                        partial_match = [ts, image]
+        for image in project_images_list:
+            if image.name == partial_name:
+                return image
+            if image.name.startswith(partial_name):
+                ts = timestamp_to_datetime(
+                    image.extra['creationTimestamp'])
+                if not partial_match or partial_match[0] < ts:
+                    partial_match = [ts, image]
 
         if partial_match:
             return partial_match[1]

@@ -574,6 +574,7 @@ class PageListSum(PageList):
         Will fetch elements from self, then from other
         """
         self.page_lists.append(other)
+        return self
 
     def has_more(self):
         return any(pl.has_more() for pl in self.page_lists)
