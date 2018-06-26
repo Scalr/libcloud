@@ -2203,6 +2203,12 @@ class GCENodeDriver(NodeDriver):
         return list_forwarding_rules
 
     def list_images(self, *args, **kwargs):
+        """
+        See ``iterate_images()``
+
+        :return:  List of GCENodeImage objects
+        :rtype:   ``list`` of :class:`GCENodeImage`
+        """
         return list(self.iterate_images(*args, **kwargs))
 
     def iterate_images(self, ex_project=None, ex_include_deprecated=False,
@@ -2218,8 +2224,8 @@ class GCENodeDriver(NodeDriver):
                                          be returned.
         :type     ex_include_deprecated: ``bool``
 
-        :return:  List of GCENodeImage objects
-        :rtype:   ``list`` of :class:`GCENodeImage`
+        :return:  Iterator on GCENodeImage objects
+        :rtype:   ``GCEList`` of :class:`GCENodeImage`
         """
         request = '/global/images'
 
@@ -2375,6 +2381,12 @@ class GCENodeDriver(NodeDriver):
         return list_networks
 
     def list_nodes(self, *args, **kwargs):
+        """
+        See ``iterate_nodes()``
+
+        :return:  List of Node objects
+        :rtype:   ``list`` of :class:`Node`
+        """
         return list(self.iterate_nodes(*args, **kwargs))
 
     def iterate_nodes(self, ex_zone=None, ex_use_disk_cache=True, ex_page_size=DEFAULT_PAGE_SIZE):
@@ -2390,8 +2402,8 @@ class GCENodeDriver(NodeDriver):
                                    than making a distinct API call for it.
         :type     ex_use_disk_cache: ``bool``
 
-        :return:  List of Node objects
-        :rtype:   ``list`` of :class:`Node`
+        :return:  Iterator on Node objects
+        :rtype:   ``GCEList`` of :class:`Node`
         """
         zone = self._set_zone(ex_zone)
         if zone is None:
@@ -2489,14 +2501,20 @@ class GCENodeDriver(NodeDriver):
         return list_sizes
 
     def ex_list_snapshots(self, *args, **kwargs):
+        """
+        See ``iterate_snapshots()``
+
+        :return:  List of GCESnapshot objects
+        :rtype:   ``list`` of :class:`GCESnapshot`
+        """
         return list(self.ex_iterate_snapshots(*args, **kwargs))
 
     def ex_iterate_snapshots(self, ex_page_size=DEFAULT_PAGE_SIZE):
         """
         Return the list of disk snapshots in the project.
 
-        :return:  A list of snapshot objects
-        :rtype:   ``list`` of :class:`GCESnapshot`
+        :return:  Iterator on snapshot objects
+        :rtype:   ``GCEList`` of :class:`GCESnapshot`
         """
         snapshot_paginator = GCEList(
             self,
@@ -2715,7 +2733,16 @@ class GCENodeDriver(NodeDriver):
                                     for a in response['items']]
         return list_autoscalers
 
-    def list_volumes(self, ex_zone=None):
+    def list_volumes(self, *args, **kwargs):
+        """
+        See ``iterate_volumes()``
+
+        :return: A list of volume objects.
+        :rtype: ``list`` of :class:`StorageVolume`
+        """
+        return list(self.iterate_volumes(*args, **kwargs))
+
+    def iterate_volumes(self, ex_zone=None, ex_page_size=DEFAULT_PAGE_SIZE):
         """
         Return a list of volumes for a zone or all.
 
@@ -2726,28 +2753,39 @@ class GCENodeDriver(NodeDriver):
         :type     ex_zone: ``str`` or :class:`GCEZone` or
                             :class:`NodeLocation` or ``None``
 
-        :return: A list of volume objects.
-        :rtype: ``list`` of :class:`StorageVolume`
+        :return: Iterator on volume objects.
+        :rtype: ``GCEList`` of :class:`StorageVolume`
         """
-        list_volumes = []
         zone = self._set_zone(ex_zone)
         if zone is None:
             request = '/aggregated/disks'
         else:
             request = '/zones/%s/disks' % (zone.name)
 
-        response = self.connection.request(request, method='GET').object
-        if 'items' in response:
-            # The aggregated response returns a dict for each zone
-            if zone is None:
-                for v in response['items'].values():
-                    zone_volumes = [self._to_storage_volume(d)
-                                    for d in v.get('disks', [])]
-                    list_volumes.extend(zone_volumes)
-            else:
-                list_volumes = [self._to_storage_volume(d)
-                                for d in response['items']]
-        return list_volumes
+        def volumes_splitter(response):
+            response = response.object
+            list_volumes = []
+            if 'items' in response:
+                # The aggregated response returns a dict for each zone
+                if zone is None:
+                    for v in response['items'].values():
+                        zone_volumes = [self._to_storage_volume(d)
+                                        for d in v.get('disks', [])]
+                        list_volumes.extend(zone_volumes)
+                else:
+                    list_volumes = [self._to_storage_volume(d)
+                                    for d in response['items']]
+            return list_volumes
+
+        volume_paginator = GCEList(
+            self,
+            self.connection.request,
+            (request,),
+            {'method': 'GET'},
+            page_size=ex_page_size,
+            split_fn=volumes_splitter)
+
+        return volume_paginator
 
     def ex_list_zones(self):
         """
