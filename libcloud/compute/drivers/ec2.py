@@ -3572,18 +3572,15 @@ class EC2PageList(misc_utils.PageList):
     page_token_name = 'NextToken'
     page_size_name = 'MaxResults'
 
-    def set_next_page_token(self):
-        next_token = self.next_page_token()
-        if next_token:
-            self.fn_kwargs['params'][self.page_token_name] = next_token
-
-    def set_page_size(self):
+    def update_request_kwds(self):
+        if self.next_page_token:
+            self.request_kwargs['params'][self.page_token_name] = self.next_page_token
         if self.page_size:
-            self.fn_kwargs['params'][self.page_size_name] = self.page_size
+            self.request_kwargs['params'][self.page_size_name] = self.page_size
 
-    def next_page_token(self):
-        if self.response:
-            return findtext(element=self.response.object, xpath='nextToken',
+    def extract_next_page_token(self, response):
+        if response:
+            return findtext(element=response.object, xpath='nextToken',
                             namespace=NAMESPACE)
 
 
@@ -3658,27 +3655,25 @@ class BaseEC2NodeDriver(NodeDriver):
         if ex_filters:
             params.update(self._build_filters(ex_filters))
 
-        def nodes_splitter(resp):
+        def split_to_nodes(response):
             nodes = []
-            for rs in findall(resp.object, xpath='reservationSet/item',
+            for rs in findall(response.object, xpath='reservationSet/item',
                               namespace=NAMESPACE):
                 nodes += self._to_nodes(rs, 'instancesSet/item')
-            return nodes
 
-        def extend_adresses(page):
-            nodes_elastic_ips_mappings = self.ex_describe_addresses(page)
-            for node in page:
+            nodes_elastic_ips_mappings = self.ex_describe_addresses(nodes)
+            for node in nodes:
                 ips = nodes_elastic_ips_mappings[node.id]
                 node.public_ips.extend(ips)
-            return page
+
+            return nodes
 
         node_paginator = EC2PageList(
             self.connection.request,
             (self.path,),
             {'params': params},
             page_size=ex_page_size,
-            split_fn=nodes_splitter)
-        node_paginator.apply(extend_adresses, scope='page')
+            process_fn=split_to_nodes)
 
         return node_paginator
 
@@ -3801,7 +3796,7 @@ class BaseEC2NodeDriver(NodeDriver):
         if ex_volume_ids:
             params.update(self._pathlist('VolumeId', ex_volume_ids))
 
-        def volume_splitter(response):
+        def split_to_volumes(response):
             return [self._to_volume(el) for el in response.object.findall(
                     fixxpath(xpath='volumeSet/item', namespace=NAMESPACE))]
 
@@ -3810,7 +3805,7 @@ class BaseEC2NodeDriver(NodeDriver):
             (self.path,),
             {'params': params},
             page_size=ex_page_size,
-            split_fn=volume_splitter)
+            process_fn=split_to_volumes)
 
         return volume_paginator
 
@@ -4220,15 +4215,12 @@ class BaseEC2NodeDriver(NodeDriver):
                 'Owner.1': owner,
             })
 
-        def snapshot_splitter(response):
-            return self._to_snapshots(response.object)
-
         snapshot_paginator = EC2PageList(
             self.connection.request,
             (self.path,),
             {'params': params},
             page_size=ex_page_size,
-            split_fn=snapshot_splitter)
+            process_fn=lambda response: self._to_snapshots(response.object))
 
         return snapshot_paginator
 

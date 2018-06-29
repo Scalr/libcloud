@@ -208,7 +208,7 @@ class GCEConnection(GoogleBaseConnection):
         return {'items': merged_items}
 
 
-class GCEList(misc_utils.PageList):
+class GCEPageList(misc_utils.PageList):
     """
     An Iterator that wraps list functions to provide additional features.
 
@@ -217,7 +217,7 @@ class GCEList(misc_utils.PageList):
     filter(), iterate over this list with next page requests done automatically
     or use page() explicitly.
 
-    >>> l=GCEList(driver, driver.ex_list_urlmaps)
+    >>> l=GCEPageList(driver, driver.ex_list_urlmaps)
     >>> for url_map in l.filter('name eq ...-map'):
     ...    url_map
     ...
@@ -235,25 +235,24 @@ class GCEList(misc_utils.PageList):
         :param  params: request params.
         :type   params: ``dict``
         """
-        super(GCEList, self).__init__(*args, **kwargs)
+        super(GCEPageList, self).__init__(*args, **kwargs)
         self.driver = driver
         self.params = kwargs.get('params', {})
 
     def page(self):
         self.driver.connection.gce_params = self.params
-        return super(GCEList, self).page()
+        return super(GCEPageList, self).page()
 
-    def set_next_page_token(self):
-        next_token = self.next_page_token()
-        if next_token:
-            self.params[self.page_token_name] = next_token
-
-    def set_page_size(self):
+    def update_request_kwds(self):
+        if self.next_page_token:
+            self.params[self.page_token_name] = self.next_page_token
         if self.page_size:
             self.params[self.page_size_name] = self.page_size
 
-    def next_page_token(self):
-        if self.response:
+    def extract_next_page_token(self, response):
+        if response:
+            # If there was a response, params dict will be updated with the new
+            # pageToken
             return self.params.get('pageToken')
 
     def filter(self, expression):
@@ -281,8 +280,8 @@ class GCEList(misc_utils.PageList):
         :param  expression: Filter expression described above.
         :type   expression: ``str``
 
-        :return: This :class:`GCEList` instance
-        :rtype:  :class:`GCEList`
+        :return: This :class:`GCEPageList` instance
+        :rtype:  :class:`GCEPageList`
         """
         self.params['filter'] = expression
         return self
@@ -2225,18 +2224,18 @@ class GCENodeDriver(NodeDriver):
         :type     ex_include_deprecated: ``bool``
 
         :return:  Iterator on GCENodeImage objects
-        :rtype:   ``GCEList`` of :class:`GCENodeImage`
+        :rtype:   ``GCEPageList`` of :class:`GCENodeImage`
         """
         request = '/global/images'
 
-        def images_splitter(response):
+        def split_to_images(response):
             image_list = []
             for img in response.object.get('items', []):
                 if 'deprecated' not in img or ex_include_deprecated:
                     image_list.append(self._to_node_image(img))
             return image_list
 
-        def images_requester(project):
+        def request_images(project):
             saved_request_path = self.connection.request_path
 
             # Override the connection request path
@@ -2253,33 +2252,33 @@ class GCENodeDriver(NodeDriver):
         image_paginator = None
 
         if isinstance(ex_project, str):
-            image_paginator = GCEList(
+            image_paginator = GCEPageList(
                 self,
-                images_requester,
+                request_images,
                 (ex_project,),
                 {},
                 page_size=ex_page_size,
-                split_fn=images_splitter)
+                process_fn=split_to_images)
 
             return image_paginator
 
         if ex_project is None:
-            image_paginator = GCEList(
+            image_paginator = GCEPageList(
                 self,
                 self.connection.request,
                 (request,),
                 {'method': 'GET'},
                 page_size=ex_page_size,
-                split_fn=images_splitter)
+                process_fn=split_to_images)
             ex_project = list(self.IMAGE_PROJECTS.keys())
 
-        multi_lists = [GCEList(
+        multi_lists = [GCEPageList(
             self,
-            images_requester,
+            request_images,
             (proj,),
             {},
             page_size=ex_page_size,
-            split_fn=images_splitter) for proj in ex_project]
+            process_fn=split_to_images) for proj in ex_project]
 
         if image_paginator:
             multi_lists.insert(0, image_paginator)
@@ -2411,7 +2410,7 @@ class GCENodeDriver(NodeDriver):
         :type     ex_use_disk_cache: ``bool``
 
         :return:  Iterator on Node objects
-        :rtype:   ``GCEList`` of :class:`Node`
+        :rtype:   ``GCEPageList`` of :class:`Node`
         """
         zone = self._set_zone(ex_zone)
         if zone is None:
@@ -2419,7 +2418,7 @@ class GCENodeDriver(NodeDriver):
         else:
             request = '/zones/%s/instances' % (zone.name)
 
-        def nodes_splitter(response):
+        def split_to_nodes(response):
             if 'items' not in response.object:
                 return []
 
@@ -2454,13 +2453,13 @@ class GCENodeDriver(NodeDriver):
 
             return node_list
 
-        node_paginator = GCEList(
+        node_paginator = GCEPageList(
             self,
             self.connection.request,
             (request,),
             {'method': 'GET'},
             page_size=ex_page_size,
-            split_fn=nodes_splitter)
+            process_fn=split_to_nodes)
 
         return node_paginator
 
@@ -2522,15 +2521,15 @@ class GCENodeDriver(NodeDriver):
         Return the list of disk snapshots in the project.
 
         :return:  Iterator on snapshot objects
-        :rtype:   ``GCEList`` of :class:`GCESnapshot`
+        :rtype:   ``GCEPageList`` of :class:`GCESnapshot`
         """
-        snapshot_paginator = GCEList(
+        snapshot_paginator = GCEPageList(
             self,
             self.connection.request,
             ('/global/snapshots',),
             {'method': 'GET'},
             page_size=ex_page_size,
-            split_fn=lambda resp:
+            process_fn=lambda resp:
                 [self._to_snapshot(s) for s in resp.object.get('items', [])])
         return snapshot_paginator
 
@@ -2762,7 +2761,7 @@ class GCENodeDriver(NodeDriver):
                             :class:`NodeLocation` or ``None``
 
         :return: Iterator on volume objects.
-        :rtype: ``GCEList`` of :class:`StorageVolume`
+        :rtype: ``GCEPageList`` of :class:`StorageVolume`
         """
         zone = self._set_zone(ex_zone)
         if zone is None:
@@ -2770,7 +2769,7 @@ class GCENodeDriver(NodeDriver):
         else:
             request = '/zones/%s/disks' % (zone.name)
 
-        def volumes_splitter(response):
+        def split_to_volumes(response):
             response = response.object
             list_volumes = []
             if 'items' in response:
@@ -2785,13 +2784,13 @@ class GCENodeDriver(NodeDriver):
                                     for d in response['items']]
             return list_volumes
 
-        volume_paginator = GCEList(
+        volume_paginator = GCEPageList(
             self,
             self.connection.request,
             (request,),
             {'method': 'GET'},
             page_size=ex_page_size,
-            split_fn=volumes_splitter)
+            process_fn=split_to_volumes)
 
         return volume_paginator
 

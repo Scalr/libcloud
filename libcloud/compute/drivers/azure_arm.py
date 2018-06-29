@@ -152,17 +152,14 @@ class AzurePageList(misc_utils.PageList):
         super(AzurePageList, self).__init__(*args, **kwargs)
         self.page_size = 1000
 
-    def set_next_page_token(self):
-        next_link = self.next_page_token()
-        if next_link:
-            parsed_url = six.moves.urllib.parse.urlparse(next_link)
-            self.fn_kwargs['params'] = six.moves.urllib.parse.parse_qs(parsed_url.query)
+    def update_request_kwds(self):
+        if self.next_page_token:
+            parsed_url = six.moves.urllib.parse.urlparse(self.next_page_token)
+            self.request_kwargs['params'] = six.moves.urllib.parse.parse_qs(
+                parsed_url.query)
 
-    def set_page_size(self):
-        pass
-
-    def next_page_token(self):
-        return self.response.object.get('nextLink')
+    def extract_next_page_token(self, response):
+        return response.object.get('nextLink')
 
 
 class AzureNodeDriver(NodeDriver):
@@ -303,7 +300,7 @@ class AzureNodeDriver(NodeDriver):
                      "images" \
                      % (self.subscription_id)
 
-        def image_splitter(response):
+        def split_to_images(response):
             return [self._to_image(img)
                     for img in response.object["value"]]
 
@@ -311,7 +308,7 @@ class AzureNodeDriver(NodeDriver):
             self.connection.request,
             (action,),
             {'params': {"api-version": "2017-12-01"}},
-            split_fn=image_splitter)
+            process_fn=split_to_images)
 
         return image_paginator
 
@@ -379,7 +376,7 @@ class AzureNodeDriver(NodeDriver):
                      "virtualMachines" \
                      % (self.subscription_id)
 
-        def node_splitter(response):
+        def split_to_nodes(response):
             return [self._to_node(n,
                                   fetch_nic=ex_fetch_nic,
                                   fetch_power_state=ex_fetch_power_state)
@@ -389,7 +386,7 @@ class AzureNodeDriver(NodeDriver):
             self.connection.request,
             (action,),
             {'params': {"api-version": "2015-06-15"}},
-            split_fn=node_splitter)
+            process_fn=split_to_nodes)
 
         return node_paginator
 
@@ -902,7 +899,7 @@ class AzureNodeDriver(NodeDriver):
             resource_group=ex_resource_group
         )
 
-        def volume_splitter(response):
+        def split_to_volumes(response):
             return [self._to_volume(volume)
                     for volume in response.object['value']]
 
@@ -911,7 +908,7 @@ class AzureNodeDriver(NodeDriver):
             (action,),
             {'method': 'GET',
              'params': {"api-version": RESOURCE_API_VERSION}},
-            split_fn=volume_splitter)
+            process_fn=split_to_volumes)
 
         return volume_paginator
 
@@ -1124,7 +1121,7 @@ class AzureNodeDriver(NodeDriver):
             resource_group=ex_resource_group
         )
 
-        def snapshot_splitter(response):
+        def split_to_snapshots(response):
             return [self._to_snapshot(snap)
                     for snap in response.object['value']]
 
@@ -1133,7 +1130,7 @@ class AzureNodeDriver(NodeDriver):
             (action,),
             {'method': 'GET',
              'params': {"api-version": RESOURCE_API_VERSION}},
-            split_fn=snapshot_splitter)
+            process_fn=split_to_snapshots)
 
         return snapshot_paginator
 

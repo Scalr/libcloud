@@ -419,7 +419,7 @@ class PageList(object):
             {'kwarg1': val1,
              'kwarg2': val2},
             page_size=20,
-            split_fn=lambda x: x.split(';'))
+            process_fn=lambda x: x.split(';'))
     >>> for node in node_pager:  # node_pager will automatically "switch" pages
             save_node_info(node)
 
@@ -432,7 +432,7 @@ class PageList(object):
             {'kwarg1': val1,
              'kwarg2': val2},
             page_size=20,
-            split_fn=lambda x: x.split(';'))
+            process_fn=lambda x: x.split(';'))
     >>> current_page = node_pager.page()
     >>> while current_page:
             for node in current_page:
@@ -443,20 +443,21 @@ class PageList(object):
     page_token_name = None
     page_size_name = None
 
-    def __init__(self, list_fn, fn_args, fn_kwargs, page_size=0, split_fn=None):
+    def __init__(self, request_fn, request_args, request_kwargs, page_size=0,
+            process_fn=None):
         """
-        :param function list_fn: list function that has pagination parameter.
-        :param list fn_args: list of function arguments.
-        :param dict fn_kwargs: dict of function keyword arguments
-        :param function split_fn: function to be applied to the response page.
-            Must return list.
+        :param function request_fn: Function that accepts pagination parameter.
+        :param list request_args: List of function arguments.
+        :param dict request_kwargs: Dict of function keyword arguments
+        :param function process_fn: Function to be applied to return value of
+            `request_fn`. It must produce list of elements.
         """
-        self.list_fn = list_fn
-        self.fn_args = fn_args
-        self.fn_kwargs = fn_kwargs
+        self.request_fn = request_fn
+        self.request_args = request_args
+        self.request_kwargs = request_kwargs
         self.page_size = page_size
-        self.split_fn = split_fn
-        self.response = None
+        self.process_fn = process_fn
+        self.next_page_token = None
         self.current_page = None
         self.applied_functions = []
 
@@ -482,29 +483,34 @@ class PageList(object):
                 .format(scope))
         self.applied_functions.append((func, scope))
 
-    def next_page_token(self):
+    def extract_next_page_token(self, response):
         """
-        Returns value of the next page token/marker. Must return None
-        to signalize that there are no more pages to request.
+        Returns value of the next page token/marker from the response.
+        Must return None to signalize that there are no more pages to request.
 
         Subclasses need specify page_token_name and to implement this method
         in order for page() method to know how to select pages.
+
+        :param object response: Response returned by `request_function()`.
         """
         raise NotImplementedError()
 
-    def set_next_page_token(self):
+    def update_request_kwds(self):
+        """
+        Updates token/identifier parameter of the next page and page size
+        for `request_function()`.
+        """
         if self.page_token_name is not None:
-            self.fn_kwargs[self.page_token_name] = self.next_page_token()
-
-    def set_page_size(self):
+            self.request_kwargs[self.page_token_name] = self.next_page_token
         if self.page_size_name is not None:
-            self.fn_kwargs[self.page_size_name] = self.page_size
+            self.request_kwargs[self.page_size_name] = self.page_size
 
     def has_more(self):
         """
         Returns True if there is still data to request.
         """
-        return self.current_page is None or self.next_page_token() is not None
+        return self.current_page is None \
+            or self.next_page_token is not None
 
     def page(self):
         """
@@ -514,15 +520,15 @@ class PageList(object):
         if not self.has_more():
             return None
 
-        self.set_page_size()
-        self.response = self.list_fn(*self.fn_args, **self.fn_kwargs)
+        self.update_request_kwds()
+        response = self.request_fn(*self.request_args, **self.request_kwargs)
 
-        # If response is not a list, there should be split_fn to break response
+        # If response is not a list, there should be process_fn to break response
         # into elements and return a list of them.
-        if self.split_fn:
-            self.current_page = self.split_fn(self.response)
+        if self.process_fn:
+            self.current_page = self.process_fn(response)
         else:
-            self.current_page = self.response
+            self.current_page = response
 
         # Applying delayed functions to the page.
         for f, scope in self.applied_functions:
@@ -536,7 +542,7 @@ class PageList(object):
                     .format(scope))
 
         # Saving page token for later use
-        self.set_next_page_token()
+        self.next_page_token = self.extract_next_page_token(response)
 
         return self.current_page
 
@@ -593,4 +599,4 @@ class PageListSum(PageList):
         """
         Produces multiple PageLists for each function in fn_iterator.
         """
-        return [cls(list_fn, *args, **kwargs) for list_fn in fn_iterator]
+        return [cls(request_fn, *args, **kwargs) for request_fn in fn_iterator]

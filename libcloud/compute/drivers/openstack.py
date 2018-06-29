@@ -72,18 +72,15 @@ class OpenStackPageList(misc_utils.PageList):
     page_token_name = 'marker'
     page_size_name = 'limit'
 
-    def set_next_page_token(self):
-        next_token = self.next_page_token()
-        if next_token:
-            self.fn_kwargs.setdefault('params', {})
-            self.fn_kwargs['params'][self.page_token_name] = next_token
-
-    def set_page_size(self):
+    def update_request_kwds(self):
+        if self.next_page_token:
+            self.request_kwargs.setdefault('params', {})
+            self.request_kwargs['params'][self.page_token_name] = self.next_page_token
         if self.page_size:
-            self.fn_kwargs.setdefault('params', {})
-            self.fn_kwargs['params'][self.page_size_name] = self.page_size
+            self.request_kwargs.setdefault('params', {})
+            self.request_kwargs['params'][self.page_size_name] = self.page_size
 
-    def next_page_token(self):
+    def extract_next_page_token(self, response):
         # OpenStack uses id of the last element in page as a token/marker.
         # So although technically it is always present, we need to make an
         # additional page size check to avoid unnecessary request.
@@ -105,7 +102,7 @@ class VolumePageList(OpenStackPageList):
         self.page_num += 1
         return super(VolumePageList, self).page(*args, **kwargs)
 
-    def next_page_token(self):
+    def extract_next_page_token(self, response):
         if self.current_page and len(self.current_page) >= self.page_size:
             return self.page_num * self.page_size
 
@@ -224,7 +221,7 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
             ('/servers/detail',),
             {'params': params},
             page_size=ex_page_size,
-            split_fn=lambda response: self._to_nodes(response.object))
+            process_fn=lambda response: self._to_nodes(response.object))
         return node_paginator
 
     def create_volume(self, size, name, location=None, snapshot=None,
@@ -322,7 +319,7 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
             ('/os-volumes',),
             {},
             page_size=ex_page_size,
-            split_fn=lambda response: self._to_volumes(response.object))
+            process_fn=lambda response: self._to_volumes(response.object))
         return volume_paginator
 
     def ex_get_volume(self, volumeId):
@@ -348,7 +345,7 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
             ('/images/detail',),
             {},
             page_size=ex_page_size,
-            split_fn=lambda response: self._to_images(response.object,
+            process_fn=lambda response: self._to_images(response.object,
                                                       ex_only_active))
         return image_paginator
 
@@ -1733,7 +1730,7 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
             ('/os-snapshots',),
             {},
             page_size=ex_page_size,
-            split_fn=lambda response: self._to_snapshots(response.object))
+            process_fn=lambda response: self._to_snapshots(response.object))
         return snapshot_paginator
 
     def list_volume_snapshots(self, volume):
