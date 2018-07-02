@@ -47,6 +47,7 @@ from libcloud.compute.base import VolumeSnapshot
 from libcloud.compute.types import NodeState
 from libcloud.compute.types import Provider
 from libcloud.utils.networking import is_public_subnet
+from libcloud.utils import misc as misc_utils
 
 
 __all__ = [
@@ -55,10 +56,122 @@ __all__ = [
 
 
 DEFAULT_CONNECTION_TIMEOUT = 5  # default connection timeout in seconds
-DEFAULT_PAGE_SIZE = 1000
+DEFAULT_PAGE_SIZE = 5
+
+
+class VMwarePropertyCollectorPaginator(misc_utils.PageList):
+    """
+    The paginator for the PropertyCollector.
+
+    See:
+     - http://pubs.vmware.com/vsphere-50/index.jsp#com.vmware.wssdk.pg.doc_50/PG_Ch5_PropertyCollector.7.2.html
+    """
+
+    def __init__(
+            self, connection, object_cls, path_set,
+            process_fn=None, page_size=DEFAULT_PAGE_SIZE):
+        """
+        :param connection: The connection to VSphere.
+        :type connection: :class:`VSphereConnection`
+
+        :param object_cls: Type of managed object.
+        :type object_cls: :class:`vim.ManagedEntity`
+
+        :param path_set: List of properties to retrieve.
+        :type path_set: list
+
+        :param page_size: [description], defaults to None.
+        :param page_size: int, optional
+
+        :param process_fn: [description], defaults to None.
+        :param process_fn: callable, optional
+        """
+        self._connection = connection
+        self._object_cls = object_cls
+        self._path_set = path_set
+        self._collector = None
+
+        def _process_fn(result):
+            """Convert result to dict before processing."""
+            result = {
+                prop.obj: {prop.name: prop.val for prop in prop.propSet}
+                for prop in result.objects}
+            return process_fn(result) if process_fn else result
+
+        super(VMwarePropertyCollectorPaginator, self).__init__(
+            request_fn=self._retrieve_properties,
+            process_fn=_process_fn,
+            page_size=page_size,
+            request_args=[],
+            request_kwargs={})
+
+    def extract_next_page_token(self, response):
+        """
+        :type response: :class:`vmodl.query.PropertyCollector.RetrieveResult`
+        """
+        return response.token
+
+    def _retrieve_properties(self):
+        if self.next_page_token is None:
+            self._collector, retrieve_args = self._create_property_collector()
+            return self._collector.RetrievePropertiesEx(*retrieve_args)
+        return self._collector.ContinueRetrievePropertiesEx(
+            token=self.next_page_token)
+
+    def _create_property_collector(self):
+        """
+        Initializes the property collector.
+
+        :return: The property collector and paramaters for
+            :meth:`vmodl.query.PropertyCollector.RetrieveProperties` method.
+        :rtype: tulpe(:class:`vmodl.query.PropertyCollector`, tuple)
+        """
+        if not self._path_set:
+            raise ValueError("Empty 'path_set' is specified")
+
+        content = self._connection.client.RetrieveContent()
+        collector = content.propertyCollector
+        container_view = content.viewManager.CreateContainerView(
+            container=content.rootFolder,
+            type=[self._object_cls],
+            recursive=True,
+        )  # type: vim.view.ContainerView
+
+        # Create a traversal specification to identify the path for
+        # collection
+        traversal_spec = vmodl.query.PropertyCollector.TraversalSpec(
+            name='traverseEntities',
+            path='view',
+            skip=False,
+            type=container_view.__class__)
+
+        # Create an object specification to define the starting point
+        # for inventory navigation
+        object_spec = vmodl.query.PropertyCollector.ObjectSpec(
+            obj=container_view,
+            skip=True,
+            selectSet=[traversal_spec])
+
+        # Identify the properties to the retrieved
+        property_spec = vmodl.query.PropertyCollector.PropertySpec(
+            type=self._object_cls,
+            pathSet=self._path_set)
+
+        # Add the object and property specification to the property
+        # filter specification
+        filter_spec = vmodl.query.PropertyCollector.FilterSpec(
+            objectSet=[object_spec],
+            propSet=[property_spec])
+
+        # Configure max page size
+        options = vmodl.query.PropertyCollector.RetrieveOptions(
+            maxObjects=self.page_size)
+
+        return collector, ([filter_spec], options)
 
 
 class VSphereConnection(ConnectionUserAndKey):
+
     def __init__(self, user_id, key, secure=True,
                  host=None, port=None, url=None, timeout=None, **kwargs):
         if host and url:
@@ -72,10 +185,11 @@ class VSphereConnection(ConnectionUserAndKey):
             raise ValueError('Either "host" or "url" argument must be '
                              'provided')
         self.client = None
-        super(VSphereConnection, self).__init__(user_id=user_id,
-                                                key=key, secure=secure,
-                                                host=host, port=port,
-                                                timeout=timeout, **kwargs)
+        super(VSphereConnection, self).__init__(
+            user_id=user_id,
+            key=key, secure=secure,
+            host=host, port=port,
+            timeout=timeout, **kwargs)
 
     def connect(self, **kwargs):
         kwargs.pop('secure', None)
@@ -124,10 +238,11 @@ class VSphereNodeDriver(NodeDriver):
     def __init__(self, username, password, secure=True,
                  host=None, port=None, url=None, timeout=None, **kwargs):
         self.url = url
-        super(VSphereNodeDriver, self).__init__(key=username, secret=password,
-                                                secure=secure, host=host,
-                                                port=port, url=url,
-                                                timeout=timeout, **kwargs)
+        super(VSphereNodeDriver, self).__init__(
+            key=username, secret=password,
+            secure=secure, host=host,
+            port=port, url=url,
+            timeout=timeout, **kwargs)
 
     def _ex_connection_class_kwargs(self):
         kwargs = {
@@ -136,49 +251,72 @@ class VSphereNodeDriver(NodeDriver):
 
         return kwargs
 
-    def list_nodes(
-            self,
-            ex_datacenter=None,
-            ex_cluster=None,
-            ex_resource_pool=None):
+    def list_nodes(self, ex_page_size=None):
         """
         Lists available nodes (excluding templates).
         """
-        if ex_cluster is not None:
-            raise NotImplementedError(
-                'ex_cluster filter is not implemented yet.')
-        if ex_resource_pool is not None:
-            raise NotImplementedError(
-                'ex_resource_pool filter is not implemented yet.')
+        return list(self.iterate_nodes(
+            ex_page_size=ex_page_size,
+        ))
 
-        virtual_machines = self._list_virtual_machines(
-            datacenter=ex_datacenter,
-            cluster=ex_cluster,
-            resource_pool=ex_resource_pool,
-            is_template=False)
-        nodes = [self._to_node(vm) for vm in virtual_machines]
-
+    def iterate_nodes(self, ex_page_size=None):
+        """
+        Iterate available nodes (excluding templates).
+        """
         creation_times = self._query_node_creation_times()
-        for node in nodes:
-            node.created_at = creation_times.get(node.id)
 
-        return nodes
+        def result_to_nodes(result):
+            for vm_entity, vm_properties in result.items():
+                if vm_properties['summary.config'].template is True:
+                    continue
+                node = self._to_node(vm_entity, vm_properties)
+                node.created_at = creation_times.get(node.id)
+                yield node
 
-    def list_images(self, ex_datacenter=None):
+        return VMwarePropertyCollectorPaginator(
+            self.connection,
+            object_cls=vim.VirtualMachine,
+            path_set=[
+                'summary',
+                'summary.config',
+                'summary.runtime',
+                'summary.guest',
+            ],
+            process_fn=result_to_nodes,
+            page_size=ex_page_size,
+        )
+
+    def list_images(self, ex_page_size=None):
         """
         List available images (templates).
         """
-        virtual_machines = self._list_virtual_machines(
-            datacenter=ex_datacenter,
-            is_template=True)
-        images = [self._to_image(vm_image) for vm_image in virtual_machines]
+        return list(self.iterate_images(
+            ex_page_size=ex_page_size,
+        ))
 
+    def iterate_images(self, ex_page_size=None):
+        """
+        Iterate available images (templates).
+        """
         creation_times = self._query_node_creation_times()
-        for image in images:
-            image_id = image.extra['managed_object_id']
-            image.extra['created_at'] = creation_times.get(image_id)
 
-        return images
+        def result_to_images(result):
+            for vm_entity, vm_properties in result.items():
+                if vm_properties['summary.config'].template is False:
+                    continue
+                image = self._to_image(vm_entity, vm_properties)
+                image.created_at = creation_times.get(image.id)
+                yield image
+
+        return VMwarePropertyCollectorPaginator(
+            self.connection,
+            object_cls=vim.VirtualMachine,
+            path_set=[
+                'summary.config',
+            ],
+            process_fn=result_to_images,
+            page_size=ex_page_size,
+        )
 
     def list_volumes(self, node=None):
         """
@@ -213,30 +351,38 @@ class VSphereNodeDriver(NodeDriver):
 
         return volumes
 
-    def list_snapshots(self):
+    def iterate_volumes(self, ex_page_size=None):
+        raise NotImplementedError()
+
+    def list_snapshots(self, ex_page_size=None):
         """
         List available snapshots.
         """
-        path_set = [
-            'snapshot.rootSnapshotList',
-            'layoutEx.snapshot',
-            'layoutEx.file']
-        snapshots = []
+        return list(self.iterate_snapshots(
+            ex_page_size=ex_page_size,
+        ))
 
-        for props in self._query_vm_properties(path_set=path_set).values():
-            snapshot_tree = props.get('snapshot.rootSnapshotList')
-            snapshot_layout = props.get('layoutEx.snapshot')
-            file_layout = props.get('layoutEx.file')
+    def iterate_snapshots(self, ex_page_size=None):
+        """
+        Iterate available snapshots.
+        """
+        def result_to_snapshots(result):
+            for vm_properties in result.values():
+                snapshot_trees = vm_properties.get('snapshot.rootSnapshotList')
+                for snapshot_tree in self._walk_snapshot_tree(snapshot_trees):
+                    yield self._to_snapshot(snapshot_tree, vm_properties)
 
-            if not snapshot_tree:
-                continue
-            snapshots.extend([
-                self._to_snapshot(
-                    item,
-                    snapshot_layout=snapshot_layout,
-                    file_layout=file_layout)
-                for item in self._walk_snapshot_tree(snapshot_tree)])
-        return snapshots
+        return VMwarePropertyCollectorPaginator(
+            self.connection,
+            object_cls=vim.VirtualMachine,
+            path_set=[
+                'snapshot.rootSnapshotList',
+                'layoutEx.snapshot',
+                'layoutEx.file',
+            ],
+            process_fn=result_to_snapshots,
+            page_size=ex_page_size,
+        )
 
     def _walk_snapshot_tree(self, snapshot_tree):
         """
@@ -245,11 +391,10 @@ class VSphereNodeDriver(NodeDriver):
         :rtype: list[:class:`vim.vm.SnapshotTree`]
         """
         snapshot_data = []
-        for item in snapshot_tree:
+        for item in snapshot_tree or []:
             snapshot_data.append(item)
             child_tree = item.childSnapshotList
-            if child_tree:
-                snapshot_data.extend(self._walk_snapshot_tree(child_tree))
+            snapshot_data.extend(self._walk_snapshot_tree(child_tree))
         return snapshot_data
 
     def _query_node_creation_times(self, virtual_machine=None):
@@ -323,6 +468,67 @@ class VSphereNodeDriver(NodeDriver):
 
         return volume_creation_times
 
+    def _query_vm_virtual_disks(self, virtual_machines=None):
+        """
+        Return properties of :class:`vim.vm.device.VirtualDisk`.
+        See:
+         - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.device.VirtualDisk.html
+        :param virtual_machine: The virtual machine.
+        :type virtual_machine: :class:`vim.VirtualMachine`
+        :rtype: list[:class:`_VMDiskInfo`]
+        """
+        # TODO: use property collector
+        virtual_machines = virtual_machines or self._list_virtual_machines()
+        datastores_info = [ds.info for ds in self._list_datastores()]
+
+        result = []
+        for virtual_machine in virtual_machines:
+            # pylint: disable=protected-access
+            vm_id = virtual_machine._GetMoId()
+            vm_config = virtual_machine.config
+            if not vm_config:
+                continue
+
+            vm_devices = vm_config.hardware.device
+            vm_disks = {
+                entity for entity in vm_devices
+                if isinstance(entity, vim.vm.device.VirtualDisk)}
+            scsi_controller_to_device_map = {
+                device: {
+                    'unit_number': entity.scsiCtlrUnitNumber,
+                    'bus_number': entity.busNumber}
+                for entity in vm_devices
+                if isinstance(entity, vim.vm.device.VirtualSCSIController)
+                for device in entity.device}
+
+            for disk in vm_disks:
+                backing = disk.backing
+                device_info = disk.deviceInfo
+                if not isinstance(backing, vim.vm.device.VirtualDevice.FileBackingInfo):
+                    continue
+
+                file_path = self._file_name_to_path(
+                    backing.fileName,
+                    datastores_info=datastores_info)
+                disk_info = _VMDiskInfo(
+                    disk_id=disk.diskObjectId,
+                    owner_id=vm_id,
+                    file_path=file_path,
+                    size=disk.capacityInKB,
+                    label=device_info.label if device_info else None,
+                    summary=device_info.summary if device_info else None,
+                    sharing=backing.sharing == 'sharingMultiWriter',
+                    disk_mode=backing.diskMode)
+                if disk.key in scsi_controller_to_device_map:
+                    scsi_controller = scsi_controller_to_device_map[disk.key]
+                    disk_info.scsi_host = scsi_controller['unit_number']
+                    disk_info.scsi_bus = scsi_controller['bus_number']
+                    disk_info.scsi_target = disk.controllerKey
+                    disk_info.scsi_lun = disk.unitNumber
+
+                result.append(disk_info)
+        return result
+
     def ex_get_vm(self, node_or_uuid):
         """
         Searches VMs for a given instance_uuid or Node object.
@@ -338,32 +544,6 @@ class VSphereNodeDriver(NodeDriver):
         if not vm:
             raise LibcloudError("Unable to locate VirtualMachine.")
         return vm
-
-    def _list_virtual_machines(
-            self,
-            datacenter=None,
-            cluster=None,
-            resource_pool=None,
-            is_template=None):
-        """
-        Lists available virtual machines and/or templates.
-
-        :param is_template: bool
-        """
-        content = self._retrieve_content()
-        virtual_machines = []
-        for child in content.rootFolder.childEntity:
-            if not isinstance(child, vim.Datacenter):
-                continue
-            if datacenter is not None and child.name != datacenter:
-                continue
-
-            for vm in self._walk_folder(child.vmFolder):
-                if is_template is not None \
-                        and vm.summary.config.template != is_template:
-                    continue
-                virtual_machines.append(vm)
-        return virtual_machines
 
     def _walk_folder(self, folder):
         """
@@ -610,37 +790,45 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: :class:`Node`
         """
-        return self._to_node(self.ex_get_vm(uuid))
+        return self._to_node(vm_entity=self.ex_get_vm(uuid))
 
-    def _to_node(self, virtual_machine):
-        summary = virtual_machine.summary
+    def _to_node(self, vm_entity, vm_properties=None):
+        """
+        Creates :class:`Node` object from :class:`vim.VirtualMachine`.
+        """
+        if vm_properties is None:
+            vm_properties = {}
+        summary = vm_properties.get('summary') or vm_entity.summary
+        config = vm_properties.get('summary.config') or vm_entity.config
+        runtime = vm_properties.get('summary.runtime') or vm_entity.runtime
+        guest = vm_properties.get('summary.guest') or vm_entity.guest
+
         extra = {
-            'uuid': summary.config.uuid,
-            'instance_uuid': summary.config.instanceUuid,
-            'path': summary.config.vmPathName,
-            'guest_id': summary.config.guestId,
-            'template': summary.config.template,
-
+            'uuid': config.uuid,
+            'instance_uuid': config.instanceUuid,
+            'path': config.vmPathName,
+            'guest_id': config.guestId,
+            'template': config.template,
             'overall_status': str(summary.overallStatus),
-            'operating_system': summary.config.guestFullName,
-
-            'cpus': summary.config.numCpu,
-            'memory_mb': summary.config.memorySizeMB
+            'operating_system': config.guestFullName,
+            'cpus': config.numCpu,
+            'memory_mb': config.memorySizeMB,
+            'boot_time': None,
+            'annotation': None,
         }
 
-        boot_time = summary.runtime.bootTime
+        boot_time = runtime.bootTime
         if boot_time:
             extra['boot_time'] = boot_time.isoformat()
 
-        annotation = summary.config.annotation
+        annotation = config.annotation
         if annotation:
             extra['annotation'] = annotation
 
         public_ips = []
         private_ips = []
-        if summary.guest is not None and summary.guest.ipAddress is not None:
-            ip_addr = ipaddress.ip_address(
-                u'{}'.format(summary.guest.ipAddress))
+        if guest is not None and guest.ipAddress is not None:
+            ip_addr = ipaddress.ip_address(u'{}'.format(guest.ipAddress))
             if isinstance(ip_addr, ipaddress.IPv4Address):
                 ip_addr = str(ip_addr)
                 if is_public_subnet(ip_addr):
@@ -648,11 +836,12 @@ class VSphereNodeDriver(NodeDriver):
                 else:
                     private_ips.append(ip_addr)
 
-        state = self.NODE_STATE_MAP.get(summary.runtime.powerState,
-                                        NodeState.UNKNOWN)
+        state = self.NODE_STATE_MAP.get(
+            runtime.powerState,
+            NodeState.UNKNOWN)
 
         node = Node(
-            id=virtual_machine._GetMoId(),
+            id=vm_entity._GetMoId(),
             name=summary.config.name,
             state=state,
             public_ips=public_ips,
@@ -660,6 +849,23 @@ class VSphereNodeDriver(NodeDriver):
             driver=self,
             extra=extra)
         return node
+
+    def _to_image(self, vm_entity, vm_properties=None):
+        """
+        Creates :class:`NodeImage` object from :class:`vim.VirtualMachine`.
+        """
+        if vm_properties is None:
+            vm_properties = {}
+        config = vm_properties.get('summary.config') or vm_entity.summary.config
+
+        return NodeImage(
+            id=config.uuid,
+            name=config.name,
+            extra={
+                # pylint: disable=protected-access
+                'managed_object_id': vm_entity._GetMoId(),
+            },
+            driver=self)
 
     def _to_volume(self, disks, datastores_info):
         """
@@ -702,13 +908,9 @@ class VSphereNodeDriver(NodeDriver):
             driver=self,
             extra=extra)
 
-    def _to_snapshot(
-            self,
-            snapshot_tree,
-            snapshot_layout=None,
-            file_layout=None):
+    def _to_snapshot(self, snapshot_tree, vm_properties=None):
         """
-        Creates :class:`VolumeSnapshot` object from disk snapshot tree.
+        Creates :class:`VolumeSnapshot` object from :class:`vim.vm.SnapshotTree`.
 
         See:
           - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.SnapshotTree.html
@@ -721,6 +923,17 @@ class VSphereNodeDriver(NodeDriver):
         :returns: Storage volume snapthot.
         :rtype: :class:`VolumeSnapshot`
         """
+        if vm_properties is None:
+            vm_properties = {}
+
+        vm_entity = snapshot_tree.vm
+        snapshot_layout = vm_properties.get('layoutEx.snapshot')
+        file_layout = vm_properties.get('layoutEx.file')
+        if snapshot_layout is None or file_layout is None:
+            layout_ex = vm_entity.layoutEx
+            snapshot_layout = snapshot_layout or layout_ex.snapshot
+            file_layout = file_layout or layout_ex.file
+
         extra = {
             'name': snapshot_tree.name,
             'description': snapshot_tree.description,
@@ -753,90 +966,3 @@ class VSphereNodeDriver(NodeDriver):
             extra=extra,
             created=snapshot_tree.createTime,
             state=None)
-
-    def _to_image(self, virtual_machine):
-        config = virtual_machine.summary.config
-        return NodeImage(
-            id=config.uuid,
-            name=config.name,
-            extra={
-                # pylint: disable=protected-access
-                'managed_object_id': virtual_machine._GetMoId(),
-            },
-            driver=self)
-
-    def _query_vm_properties(self, path_set):
-        if not path_set:
-            raise ValueError("Empty path_set is specified")
-
-        content = self._retrieve_content()
-        object_type = vim.VirtualMachine
-
-        container_view = content.viewManager.CreateContainerView(
-            container=content.rootFolder,
-            type=[object_type],
-            recursive=True,
-        )  # type: vim.view.ContainerView
-
-        return self._query_properties(
-            container_view,
-            object_type,
-            path_set=path_set)
-
-    def _query_properties(self, view, object_type, path_set):
-        """
-        Collect properties for managed objects from a managed view.
-
-        See:
-         - http://pubs.vmware.com/vsphere-50/index.jsp#com.vmware.wssdk.pg.doc_50/PG_Ch5_PropertyCollector.7.2.html
-
-        :param view: Starting point of inventory navigation.
-        :type view: :class:`vim.view.ManagedObjectView`
-
-        :param object_type: Type of managed object.
-        :type object_type: :class:`vim.ManagedEntity`
-
-        :param path_set: List of properties to retrieve.
-        :type path_set: list
-
-        :return: A list of properties for the managed objects.
-        :rtype: list[dict]
-        """
-        if not path_set:
-            raise ValueError("Empty path_set is specified")
-
-        content = self._retrieve_content()
-        collector = content.propertyCollector
-
-        # Create a traversal specification to identify the path for
-        # collection
-        traversal_spec = vmodl.query.PropertyCollector.TraversalSpec(
-            name='traverseEntities',
-            path='view',
-            skip=False,
-            type=view.__class__)
-
-        # Create object specification to define the starting point of
-        # inventory navigation
-        object_spec = vmodl.query.PropertyCollector.ObjectSpec(
-            obj=view,
-            skip=True,
-            selectSet=[traversal_spec])
-
-        # Identify the properties to the retrieved
-        property_spec = vmodl.query.PropertyCollector.PropertySpec(
-            type=object_type,
-            pathSet=path_set)
-
-        # Add the object and property specification to the property
-        # filter specification
-        filter_spec = vmodl.query.PropertyCollector.FilterSpec(
-            objectSet=[object_spec],
-            propSet=[property_spec])
-
-        # Retrieve properties
-        properties = collector.RetrieveContents([filter_spec])
-
-        return {
-            prop.obj: {prop.name: prop.val for prop in prop.propSet}
-            for prop in properties}
