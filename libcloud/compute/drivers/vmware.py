@@ -395,14 +395,11 @@ class VSphereNodeDriver(NodeDriver):
         """
         List available volumes (on all datastores).
         """
-        if node is None:
-            virtual_machines = self._list_virtual_machines()
-        else:
-            virtual_machines = [self.ex_get_vm(node)]
+        virtual_machine = self.ex_get_vm(node) if node is not None else None
 
         # Search for VM's virtual disks
         vm_disks = collections.defaultdict(list)
-        for vm_disk in self._query_vm_virtual_disks(virtual_machines):
+        for vm_disk in self._query_vm_virtual_disks():
             vm_disks[vm_disk.file_path].append(vm_disk)
 
         # Search for *.vmdk files, clusterwide or on specified node
@@ -419,7 +416,7 @@ class VSphereNodeDriver(NodeDriver):
         # Update ``StorageVolume`` creation timestamps
         creation_times = self._query_volume_creation_times(
             volumes,
-            virtual_machine=virtual_machines[0] if node is not None else None)
+            virtual_machine=virtual_machine)
         for volume in volumes:
             volume.extra['created_at'] = creation_times.get(volume.id)
 
@@ -483,8 +480,10 @@ class VSphereNodeDriver(NodeDriver):
                 'VmBeingDeployedEvent',
                 'VmCreatedEvent',
                 'VmRegisteredEvent',
-                'VmClonedEvent'],
-            entity=virtual_machine)  # type: list[vim.Event]
+                'VmClonedEvent'
+            ],
+            entity=virtual_machine,
+            page_size=1000)  # type: list[vim.Event]
         return {
             # pylint: disable=protected-access
             event.vm.vm._GetMoId(): event.createdTime
@@ -501,6 +500,7 @@ class VSphereNodeDriver(NodeDriver):
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
             entity=virtual_machine,
+            page_size=1000,
         )  # type: list[vim.Event]
 
         volume_creation_times = {}  # type: dict[str, datetime.datetime]
@@ -541,67 +541,6 @@ class VSphereNodeDriver(NodeDriver):
                     if volume.extra['file_path'] == created_file})
 
         return volume_creation_times
-
-    def _query_vm_virtual_disks(self, virtual_machines=None):
-        """
-        Return properties of :class:`vim.vm.device.VirtualDisk`.
-        See:
-         - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.device.VirtualDisk.html
-        :param virtual_machine: The virtual machine.
-        :type virtual_machine: :class:`vim.VirtualMachine`
-        :rtype: list[:class:`_VMDiskInfo`]
-        """
-        # TODO: use property collector
-        virtual_machines = virtual_machines or self._list_virtual_machines()
-        datastores_info = [ds.info for ds in self._list_datastores()]
-
-        result = []
-        for virtual_machine in virtual_machines:
-            # pylint: disable=protected-access
-            vm_id = virtual_machine._GetMoId()
-            vm_config = virtual_machine.config
-            if not vm_config:
-                continue
-
-            vm_devices = vm_config.hardware.device
-            vm_disks = {
-                entity for entity in vm_devices
-                if isinstance(entity, vim.vm.device.VirtualDisk)}
-            scsi_controller_to_device_map = {
-                device: {
-                    'unit_number': entity.scsiCtlrUnitNumber,
-                    'bus_number': entity.busNumber}
-                for entity in vm_devices
-                if isinstance(entity, vim.vm.device.VirtualSCSIController)
-                for device in entity.device}
-
-            for disk in vm_disks:
-                backing = disk.backing
-                device_info = disk.deviceInfo
-                if not isinstance(backing, vim.vm.device.VirtualDevice.FileBackingInfo):
-                    continue
-
-                file_path = self._file_name_to_path(
-                    backing.fileName,
-                    datastores_info=datastores_info)
-                disk_info = _VMDiskInfo(
-                    disk_id=disk.diskObjectId,
-                    owner_id=vm_id,
-                    file_path=file_path,
-                    size=disk.capacityInKB,
-                    label=device_info.label if device_info else None,
-                    summary=device_info.summary if device_info else None,
-                    sharing=backing.sharing == 'sharingMultiWriter',
-                    disk_mode=backing.diskMode)
-                if disk.key in scsi_controller_to_device_map:
-                    scsi_controller = scsi_controller_to_device_map[disk.key]
-                    disk_info.scsi_host = scsi_controller['unit_number']
-                    disk_info.scsi_bus = scsi_controller['bus_number']
-                    disk_info.scsi_target = disk.controllerKey
-                    disk_info.scsi_lun = disk.unitNumber
-
-                result.append(disk_info)
-        return result
 
     def ex_get_vm(self, node_or_uuid):
         """
@@ -701,7 +640,8 @@ class VSphereNodeDriver(NodeDriver):
             begin_time=None,
             end_time=None,
             userlist=None,
-            system_user=None):
+            system_user=None,
+            page_size=DEFAULT_PAGE_SIZE):
         """
         Returns the events in specified filter. Returns empty array when
         there are not any events qualified.
@@ -756,14 +696,14 @@ class VSphereNodeDriver(NodeDriver):
         content = self._retrieve_content()
         history_collector = content.eventManager.CreateCollectorForEvents(
             filter_spec)  # type: vim.event.EventHistoryCollector
-        history_collector.SetCollectorPageSize(DEFAULT_PAGE_SIZE)
+        history_collector.SetCollectorPageSize(page_size)
         history_collector.ResetCollector()
 
         events = history_collector.latestPage
         while events:
             for event in events:
                 yield event
-            events = history_collector.ReadPreviousEvents(DEFAULT_PAGE_SIZE)
+            events = history_collector.ReadPreviousEvents(page_size)
 
     def _query_datastore_files(
             self,
@@ -845,7 +785,7 @@ class VSphereNodeDriver(NodeDriver):
                     modification=file_info.modification))
         return result
 
-    def _query_vm_virtual_disks(self, virtual_machines=None):
+    def _query_vm_virtual_disks(self):
         """
         Return properties of :class:`vim.vm.device.VirtualDisk`.
 
@@ -857,36 +797,30 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: list[:class:`_VMDiskInfo`]
         """
-        # TODO: use property collector
-        virtual_machines = virtual_machines or self._list_virtual_machines()
         datastores_info = [ds.info for ds in self._list_datastores()]
 
-        result = []
-        for virtual_machine in virtual_machines:
-            # pylint: disable=protected-access
-            vm_id = virtual_machine._GetMoId()
-            vm_config = virtual_machine.config
-            if not vm_config:
-                continue
-
-            vm_devices = vm_config.hardware.device
-            vm_disks = {
-                entity for entity in vm_devices
+        def result_to_files(result):
+            vm_devices = []
+            for vm_entity, vm_properties in result.items():
+                vm_id = vm_entity._GetMoId()
+                for device in vm_properties.get('config.hardware.device') or []:
+                    vm_devices.append((vm_id, device))
+            virtual_disks = {
+                (vm_id, entity) for vm_id, entity in vm_devices
                 if isinstance(entity, vim.vm.device.VirtualDisk)}
             scsi_controller_to_device_map = {
                 device: {
                     'unit_number': entity.scsiCtlrUnitNumber,
                     'bus_number': entity.busNumber}
-                for entity in vm_devices
+                for vm_id, entity in vm_devices
                 if isinstance(entity, vim.vm.device.VirtualSCSIController)
                 for device in entity.device}
 
-            for disk in vm_disks:
+            for vm_id, disk in virtual_disks:
                 backing = disk.backing
                 device_info = disk.deviceInfo
                 if not isinstance(backing, vim.vm.device.VirtualDevice.FileBackingInfo):
                     continue
-
                 file_path = self._file_name_to_path(
                     backing.fileName,
                     datastores_info=datastores_info)
@@ -905,9 +839,16 @@ class VSphereNodeDriver(NodeDriver):
                     disk_info.scsi_bus = scsi_controller['bus_number']
                     disk_info.scsi_target = disk.controllerKey
                     disk_info.scsi_lun = disk.unitNumber
+                yield disk_info
 
-                result.append(disk_info)
-        return result
+        return VMwarePropertyCollectorPaginator(
+            connection=self.connection,
+            object_cls=vim.VirtualMachine,
+            path_set=[
+                'config.hardware.device',
+            ],
+            process_fn=result_to_files,
+        )
 
     def ex_get_node_by_uuid(self, uuid):
         """
