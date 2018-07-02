@@ -22,6 +22,7 @@ import collections
 import ipaddress
 import re
 import ssl
+import os
 
 try:
     import urlparse
@@ -30,6 +31,8 @@ except ImportError:
 
 try:
     from pyVim import connect
+    from pyVim import task as vmware_task
+    from pyVmomi import vmodl
     from pyVmomi import vim
     from pyVmomi import vmodl
 except ImportError:
@@ -168,6 +171,76 @@ class VMwarePropertyCollectorPaginator(misc_utils.PageList):
             maxObjects=self.page_size)
 
         return collector, ([filter_spec], options)
+
+
+class _FileInfo(object):
+    """
+    Stores info about the VMware file.
+    """
+
+    def __init__(self, path, size=None, owner=None, modification=None):
+        """
+        :param str path: The path to the file.
+        :param int size: The size of the file in kilobytes.
+        :param str owner: The user name of the owner of the file.
+        :param :class:`datetime.datetime` modification: The last date and time
+            the file was modified.
+        """
+        self.path = path
+        self.size = size
+        self.owner = owner
+        self.modification = modification
+
+    def __repr__(self):
+        return (
+            "<vmware.FileInfo: path={}, size={}>"
+        ).format(self.path, self.size)
+
+
+class _VMDiskInfo(object):
+    """
+    Stores info about the VMware virtual disk.
+    """
+
+    def __init__(
+            self, disk_id, owner_id, file_path,
+            size=None, label=None, summary=None, sharing=None, disk_mode=None,
+            scsi_host=None, scsi_bus=None, scsi_target=None, scsi_lun=None):
+        """
+        :param str disk_id: Virtual disk durable and unmutable identifier.
+        :param str owner_id: ID of the owner VM.
+        :param str file_path : Path to the host file used in disk backing.
+        :param int size: Capacity of this virtual disk in kilobytes.
+        :type label: str
+        :type summary: str
+        :type sharing: bool
+        :type disk_mode: str
+        :type scsi_host int:
+        :type scsi_bus: int
+        :type scsi_target int
+        :type scsi_lun: int
+        """
+        self.disk_id = disk_id
+        self.owner_id = owner_id
+        self.file_path = file_path
+        self.label = label
+        self.size = size
+        self.summary = summary
+        self.sharing = sharing
+        self.disk_mode = disk_mode
+        self.scsi_host = scsi_host
+        self.scsi_bus = scsi_bus
+        self.scsi_target = scsi_target
+        self.scsi_lun = scsi_lun
+
+    @property
+    def file_info(self):
+        return _FileInfo(self.file_path, size=self.size)
+
+    def __repr__(self):
+        return (
+            "<vmware._VMDiskInfo: disk_id={}, owner_id={}, file_path={}>"
+        ).format(self.disk_id, self.owner_id, self.file_path)
 
 
 class VSphereConnection(ConnectionUserAndKey):
@@ -327,27 +400,28 @@ class VSphereNodeDriver(NodeDriver):
         else:
             virtual_machines = [self.ex_get_vm(node)]
 
-        # grouping vm's disks by unique backing-file name
-        grouped_vm_disks = collections.defaultdict(list)
-        for vm in virtual_machines:
-            for vm_disk in self._get_vm_virtual_disks_properties(vm):
-                backing_file = vm_disk['device']['file_name']
-                grouped_vm_disks[backing_file].append(vm_disk)
+        # Search for VM's virtual disks
+        vm_disks = collections.defaultdict(list)
+        for vm_disk in self._query_vm_virtual_disks(virtual_machines):
+            vm_disks[vm_disk.file_path].append(vm_disk)
 
-        datastores_info = [
-            datastore.info for datastore in self._list_datastores()
-        ]  # type: list[vim.host.VmfsDatastoreInfo]
+        # Search for *.vmdk files, clusterwide or on specified node
+        if node is None:
+            vmkd_files = self._query_datastore_files(vim.VmDiskFileQuery())
+        else:
+            vmkd_files = {disk[0].file_info for disk in vm_disks.values()}
+
+        # Create ``StorageVolume`` objects
         volumes = [
-            self._to_volume(vm_disks, datastores_info)
-            for vm_disks in grouped_vm_disks.values()]
+            self._to_volume(vmkd_file, devices=vm_disks.get(vmkd_file.path))
+            for vmkd_file in vmkd_files]
 
-        # update volume creation timestamps
-        vm_entity = virtual_machines[0] if len(virtual_machines) == 1 else None
+        # Update ``StorageVolume`` creation timestamps
         creation_times = self._query_volume_creation_times(
-            volumes, virtual_machine=vm_entity)
+            volumes,
+            virtual_machine=virtual_machines[0] if node is not None else None)
         for volume in volumes:
-            volume_file = volume.extra['file_path']
-            volume.extra['created_at'] = creation_times.get(volume_file)
+            volume.extra['created_at'] = creation_times.get(volume.id)
 
         return volumes
 
@@ -445,9 +519,9 @@ class VSphereNodeDriver(NodeDriver):
             volume_file = volume.extra['file_path']
             for node_id, node_devices in volume.extra['devices'].items():
                 for device in node_devices:
-                    if device['scsi_unit_number'] == 7 \
-                            and device['unit_number'] == 0 \
-                            and device['scsi_bus_number'] == 0:
+                    if device['scsi_host'] == 7 \
+                            and device['scsi_bus'] == 0 \
+                            and device['scsi_lun'] == 0:
                         volume_creation_times[volume_file] = node_creation_times.get(node_id)
                         continue
 
@@ -691,98 +765,149 @@ class VSphereNodeDriver(NodeDriver):
                 yield event
             events = history_collector.ReadPreviousEvents(DEFAULT_PAGE_SIZE)
 
-    def _get_vm_virtual_disks_properties(self, virtual_machine):
+    def _query_datastore_files(
+            self,
+            file_query,
+            datastores=None,
+            sort_folders_first=True,
+            raise_on_error=True):
         """
-        Return combined properties of :class:`vim.vm.device.VirtualDisk` and
-            :class:`vim.vm.FileLayoutEx` objects.
+        Returns the information for the files that match the given search
+        criteria.
+
+        :param datastores: Search for the files, across specified datastores.
+        :type datastores: list[:class:`vim.Datastore`]
+
+        :param file_query: The set of file types to match, search criteria
+            specific to the file type, and the amount of detail for a file.
+            This parameter must be a subclass of :class:`vim.FileQuery`
+            (:class:`vim.VmDiskFileQuery`, :class:`vim.VmSnapshotFileQuery`,
+            :class:`vim.VmConfigFileQuery` etc.).
+        :type file_query: :class:`vim.FileQuery`
+
+        :param sort_folders_first: By default, files are sorted in alphabetical
+            order regardless of file type. If this flag is set to ``True``,
+            folders are placed at the start of the list of results in
+            alphabetical order. The remaining files follow in alphabetical
+            order. (``True`` by default)
+        :type sort_folders_first: bool
+
+        :param raise_on_error: Any exception from VMware task thrown is
+            thrown up to the caller if ``raise_on_error`` is set to ``True``.
+            (``True`` by default)
+        :type raise_on_error: bool
+
+        See:
+         - http://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.DatastoreBrowser.html
+         - https://pubs.vmware.com/vsphere-51/topic/com.vmware.wssdk.apiref.doc/vim.host.DatastoreBrowser.SearchSpec.html
+
+        :rtype: list[:class:`_FileInfo`]
+        """
+        if not isinstance(file_query, vim.FileQuery):
+            raise Exception("Unknown type of the file query")
+        if file_query.__class__ is vim.FileQuery:
+            raise Exception("Too broad type of the file query")
+
+        datastores = datastores or self._list_datastores()
+        datastores_info = [
+            datastore.info for datastore in datastores
+        ]  # type: list[vim.host.VmfsDatastoreInfo]
+
+        filter_query_flags = vim.FileQueryFlags(
+            fileSize=True,
+            fileType=True,
+            fileOwner=True,
+            modification=True)
+        search_spec = vim.HostDatastoreBrowserSearchSpec(
+            query=[file_query],
+            details=filter_query_flags,
+            sortFoldersFirst=sort_folders_first)
+        search_tasks = (
+            ds.browser.SearchSubFolders("[{}]".format(ds.name), search_spec)
+            for ds in datastores)
+
+        result = []  # type: list[_FileInfo]
+        for task in search_tasks:
+            vmware_task.WaitForTask(task, raiseOnError=raise_on_error)
+
+            files = (
+                (files.folderPath, info)
+                for files in task.info.result
+                for info in files.file)
+            for folder_path, file_info in files:
+                full_path = self._file_name_to_path(
+                    '{}{}'.format(folder_path, file_info.path),
+                    datastores_info=datastores_info)
+                result.append(_FileInfo(
+                    path=full_path,
+                    size=int(file_info.fileSize) / 1024,
+                    owner=file_info.owner,
+                    modification=file_info.modification))
+        return result
+
+    def _query_vm_virtual_disks(self, virtual_machines=None):
+        """
+        Return properties of :class:`vim.vm.device.VirtualDisk`.
 
         See:
          - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.device.VirtualDisk.html
-         - https://pubs.vmware.com/vsphere-6-5/topic/com.vmware.wssdk.apiref.doc/vim.vm.FileLayoutEx.html
 
         :param virtual_machine: The virtual machine.
         :type virtual_machine: :class:`vim.VirtualMachine`
 
-        :rtype: list[dict]
+        :rtype: list[:class:`_VMDiskInfo`]
         """
-        layout_ex = virtual_machine.layoutEx
-        if not layout_ex:
-            return []
+        # TODO: use property collector
+        virtual_machines = virtual_machines or self._list_virtual_machines()
+        datastores_info = [ds.info for ds in self._list_datastores()]
 
-        cloud_instance_id = virtual_machine._GetMoId()
-        vm_devices = virtual_machine.config.hardware.device
-        vm_virtual_disks = {
-            entity for entity in vm_devices
-            if isinstance(entity, vim.vm.device.VirtualDisk)}
-        vm_virtual_scsi_controllers = {
-            entity for entity in vm_devices
-            if isinstance(entity, vim.vm.device.VirtualSCSIController)}
+        result = []
+        for virtual_machine in virtual_machines:
+            # pylint: disable=protected-access
+            vm_id = virtual_machine._GetMoId()
+            vm_config = virtual_machine.config
+            if not vm_config:
+                continue
 
-        devices = {}
-        for device in vm_virtual_disks:
-            virtual_disk = {
-                'key': device.key,
-                'disk_object_id': device.diskObjectId,
-                'capacity_in_kb': device.capacityInKB,
-                'controller_key': device.controllerKey,  # optional
-                'unit_number': device.unitNumber,  # optional
-                'scsi_unit_number': None,
-                'scsi_bus_number': None,
-                'label': None,
-                'summary': None}
-            if device.deviceInfo:
-                virtual_disk['label'] = device.deviceInfo.label
-                virtual_disk['summary'] = device.deviceInfo.summary
-            backing = device.backing
-            if isinstance(backing, vim.vm.device.VirtualDevice.FileBackingInfo):
-                virtual_disk['disk_mode'] = backing.diskMode
-                virtual_disk['sharing'] = backing.sharing == 'sharingMultiWriter'
-                virtual_disk['file_name'] = backing.fileName
-            devices[device.key] = virtual_disk
-        for scsi_controller in vm_virtual_scsi_controllers:
-            for device_key in scsi_controller.device:
-                devices[device_key].update({
-                    'scsi_unit_number': scsi_controller.scsiCtlrUnitNumber,
-                    'scsi_bus_number': scsi_controller.busNumber})
+            vm_devices = vm_config.hardware.device
+            vm_disks = {
+                entity for entity in vm_devices
+                if isinstance(entity, vim.vm.device.VirtualDisk)}
+            scsi_controller_to_device_map = {
+                device: {
+                    'unit_number': entity.scsiCtlrUnitNumber,
+                    'bus_number': entity.busNumber}
+                for entity in vm_devices
+                if isinstance(entity, vim.vm.device.VirtualSCSIController)
+                for device in entity.device}
 
-        files = {}
-        for file_info in layout_ex.file:
-            files[file_info.key] = {
-                'accessible': file_info.accessible,
-                'backing_object_id': file_info.backingObjectId,
-                'name': file_info.name,
-                'key': file_info.key,
-                'size': file_info.size,
-                'type': file_info.type,
-                'unique_size': file_info.uniqueSize}
+            for disk in vm_disks:
+                backing = disk.backing
+                device_info = disk.deviceInfo
+                if not isinstance(backing, vim.vm.device.VirtualDevice.FileBackingInfo):
+                    continue
 
-        properties = []
-        for disk_info in layout_ex.disk:
-            disk_files = []
-            committed = 0
-            descriptor = None
-            for chain in getattr(disk_info, 'chain', ()):
-                for file_key in chain.fileKey:
-                    if file_key not in files:
-                        continue
-                    f = files[file_key]
-                    disk_files.append(f)
-                    if f['type'] == 'diskExtent':
-                        committed += f['size']
-                    if f['type'] == 'diskDescriptor':
-                        descriptor = f['name']
-            device = devices[disk_info.key]
-            properties.append({
-                'device': device,
-                'files': disk_files,
-                'capacity': device['capacity_in_kb'],
-                'committed': int(committed / 1024),
-                'descriptor': descriptor,
-                'label': device['label'],
-                'owner_id': cloud_instance_id
-            })
+                file_path = self._file_name_to_path(
+                    backing.fileName,
+                    datastores_info=datastores_info)
+                disk_info = _VMDiskInfo(
+                    disk_id=disk.diskObjectId,
+                    owner_id=vm_id,
+                    file_path=file_path,
+                    size=disk.capacityInKB,
+                    label=device_info.label if device_info else None,
+                    summary=device_info.summary if device_info else None,
+                    sharing=backing.sharing == 'sharingMultiWriter',
+                    disk_mode=backing.diskMode)
+                if disk.key in scsi_controller_to_device_map:
+                    scsi_controller = scsi_controller_to_device_map[disk.key]
+                    disk_info.scsi_host = scsi_controller['unit_number']
+                    disk_info.scsi_bus = scsi_controller['bus_number']
+                    disk_info.scsi_target = disk.controllerKey
+                    disk_info.scsi_lun = disk.unitNumber
 
-        return properties
+                result.append(disk_info)
+        return result
 
     def ex_get_node_by_uuid(self, uuid):
         """
@@ -867,44 +992,47 @@ class VSphereNodeDriver(NodeDriver):
             },
             driver=self)
 
-    def _to_volume(self, disks, datastores_info):
+    def _to_volume(self, file_info, devices=None):
         """
-        Creates :class:`StorageVolume` object from disk properties.
+        Creates :class:`StorageVolume` object from :class:`_FileInfo`.
 
-        :param dict disk_properties: dict in format that
-            :meth:`self._get_vm_virtual_disks_properties` returns.
+        The volume ID format: `ds:///vmfs/volumes/<store-id>/<volume-path>.vmdk`
 
-        :param disks: dict(s) in format that :meth:`self._get_vm_disks` returns.
-        :type disks: dict | list[dict]
+        The extra dict format:
+         - file_path: ``str``
+         - last_modified: ``None`` | :class:`datetime.datetime`
+         - created_at: ``None`` | :class:`datetime.datetime`
+         - devices: ``dict[str, list[dict]]``
+
+        :param file_info: The VMDK file.
+        :type file_info: :class:`_FileInfo`.
+        :param devices: The list of attached devices.
+        :type devices: list[:class:`_VMDiskInfo`]
+
+        :rtype: :class:`StorageVolume`
         """
-        if isinstance(disks, dict):
-            disks = [disks]
-        elif len(disks) > 1 and not all(disk['device']['sharing'] is True for disk in disks):
-            disks_ids = [disk['device']['disk_object_id'] for disk in disks]
+        devices = devices or []
+        if len(devices) > 1 \
+                and not all(device.sharing is True for device in devices):
+            disks_ids = [device.disk_id for device in devices]
             raise LibcloudError((
-                "Unable to create StorageVolume from multiple non-shared "
-                "disks: {}."
+                "Unable to create StorageVolume with multiple non-shared "
+                "devices: {}."
             ).format(', '.join(disks_ids)))
 
-        main_disk = disks[0]
-        volume_id = main_disk['device']['key']
-        name = main_disk['label']
-        size = int(main_disk['capacity'])
-
         extra = {
-            key: value for key, value in main_disk.items()
-            if key != 'device'}
-        extra['file_path'] = self._file_name_to_path(
-            main_disk['device']['file_name'],
-            datastores_info=datastores_info)
-        extra['devices'] = collections.defaultdict(list)
-        for disk in disks:
-            extra['devices'][disk['owner_id']].append(disk['device'])
+            'file_path': file_info.path,
+            'last_modified': file_info.modification,
+            'created_at': None,
+            'devices': collections.defaultdict(list),
+        }
+        for device in devices:
+            extra['devices'][device.owner_id].append(device.__dict__)
 
         return StorageVolume(
-            id=volume_id,
-            name=name,
-            size=size,
+            id=file_info.path,
+            name=os.path.basename(file_info.path),
+            size=file_info.size,
             driver=self,
             extra=extra)
 
