@@ -1,0 +1,7 @@
+{"datasets": [{"datasetReference": {"datasetId": "billing",
+                                    "projectId": "scalr-labs"},
+               "id": "scalr-labs:billing",
+               "kind": "bigquery#dataset",
+               "location": "US"}],
+ "etag": "72k7DzeyeEl4shlhGfnZD_UwX04/MA4ahUTR-uzIS3TMcBciFhIh_zw",
+ "kind": "bigquery#datasetList"}
