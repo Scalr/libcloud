@@ -60,49 +60,52 @@ __all__ = [
 
 
 DEFAULT_CONNECTION_TIMEOUT = 5  # default connection timeout in seconds
-DEFAULT_PAGE_SIZE = 5
+DEFAULT_PAGE_SIZE = 10
 
 
-class VMwarePropertyCollectorPaginator(misc_utils.PageList):
+class VSpherePropertyCollector(misc_utils.PageList):
     """
-    The paginator for the PropertyCollector.
+    The paginated PropertyCollector.
 
     See:
      - http://pubs.vmware.com/vsphere-50/index.jsp#com.vmware.wssdk.pg.doc_50/PG_Ch5_PropertyCollector.7.2.html
     """
 
     def __init__(
-            self, connection, object_cls, path_set,
+            self, driver, object_cls, path_set=None,
             process_fn=None, page_size=DEFAULT_PAGE_SIZE):
         """
-        :param connection: The connection to VSphere.
-        :type connection: :class:`VSphereConnection`
+        :param driver: The VSphere driver.
+        :type driver: :class:`VSphereNodeDriver`
 
         :param object_cls: Type of managed object.
         :type object_cls: :class:`vim.ManagedEntity`
 
-        :param path_set: List of properties to retrieve.
-        :type path_set: list
+        :param path_set: List of properties to retrieve, defaults to ``None``.
+        :type path_set: list or None
 
-        :param page_size: [description], defaults to None.
-        :param page_size: int, optional
+        :param page_size: [description], defaults to ``None``.
+        :param page_size: list or None
 
-        :param process_fn: [description], defaults to None.
-        :param process_fn: callable, optional
+        :param process_fn: [description], defaults to ``None``.
+        :param process_fn: callable or None
         """
-        self._connection = connection
+        self._connection = driver.connection
         self._object_cls = object_cls
         self._path_set = path_set
         self._collector = None
 
         def _process_fn(result):
-            """Convert result to dict before processing."""
-            result = {
-                prop.obj: {prop.name: prop.val for prop in prop.propSet}
-                for prop in result.objects}
+            """Convert result to list|dict before processing."""
+            if path_set is None:
+                result = [prop.obj for prop in result.objects]
+            else:
+                result = {
+                    prop.obj: {prop.name: prop.val for prop in prop.propSet}
+                    for prop in result.objects}
             return process_fn(result) if process_fn else result
 
-        super(VMwarePropertyCollectorPaginator, self).__init__(
+        super(VSpherePropertyCollector, self).__init__(
             request_fn=self._retrieve_properties,
             process_fn=_process_fn,
             page_size=page_size,
@@ -130,11 +133,7 @@ class VMwarePropertyCollectorPaginator(misc_utils.PageList):
             :meth:`vmodl.query.PropertyCollector.RetrieveProperties` method.
         :rtype: tulpe(:class:`vmodl.query.PropertyCollector`, tuple)
         """
-        if not self._path_set:
-            raise ValueError("Empty 'path_set' is specified")
-
         content = self._connection.client.RetrieveContent()
-        collector = content.propertyCollector
         container_view = content.viewManager.CreateContainerView(
             container=content.rootFolder,
             type=[self._object_cls],
@@ -171,7 +170,122 @@ class VMwarePropertyCollectorPaginator(misc_utils.PageList):
         options = vmodl.query.PropertyCollector.RetrieveOptions(
             maxObjects=self.page_size)
 
-        return collector, ([filter_spec], options)
+        return content.propertyCollector, ([filter_spec], options)
+
+
+class VCenterSearchFiles(misc_utils.PageList):
+
+    def __init__(self, driver, file_query, process_fn=None):
+        """
+        Returns the information for the files that match the given search
+        criteria.
+
+        :param datastores: Search for the files, across specified datastores.
+        :type datastores: list[:class:`vim.Datastore`]
+
+        :param file_query: The set of file types to match, search criteria
+            specific to the file type, and the amount of detail for a file.
+            This parameter must be a subclass of :class:`vim.FileQuery`
+            (:class:`vim.VmDiskFileQuery`, :class:`vim.VmSnapshotFileQuery`,
+            :class:`vim.VmConfigFileQuery` etc.).
+        :type file_query: :class:`vim.FileQuery`
+
+        :param sort_folders_first: By default, files are sorted in alphabetical
+            order regardless of file type. If this flag is set to ``True``,
+            folders are placed at the start of the list of results in
+            alphabetical order. The remaining files follow in alphabetical
+            order. (``True`` by default)
+        :type sort_folders_first: bool
+
+        :param raise_on_error: Any exception from VMware task thrown is
+            thrown up to the caller if ``raise_on_error`` is set to ``True``.
+            (``True`` by default)
+        :type raise_on_error: bool
+
+        See:
+         - http://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.DatastoreBrowser.html
+         - https://pubs.vmware.com/vsphere-51/topic/com.vmware.wssdk.apiref.doc/vim.host.DatastoreBrowser.SearchSpec.html
+
+        :rtype: list[:class:`_FileInfo`]
+        """
+        if not isinstance(file_query, vim.FileQuery):
+            raise Exception("Unknown type of the file query")
+        if file_query.__class__ is vim.FileQuery:
+            raise Exception("Too broad type of the file query")
+        self.driver = driver
+        self.file_query = file_query
+        self.search_tasks = None
+
+        super(VCenterSearchFiles, self).__init__(
+            request_fn=self._retrieve_properties,
+            process_fn=process_fn,
+            page_size=None,
+            request_args=[],
+            request_kwargs={})
+
+    def _retrieve_properties(self):
+        if self.search_tasks is None:
+            datastores = self.driver._list_datastores()
+            self.datastores_info = [
+                datastore.info for datastore in datastores
+            ]  # type: list[vim.host.VmfsDatastoreInfo]
+            filter_query_flags = vim.FileQueryFlags(
+                fileSize=True,
+                fileType=True,
+                fileOwner=True,
+                modification=True)
+            search_spec = vim.HostDatastoreBrowserSearchSpec(
+                query=[self.file_query],
+                details=filter_query_flags,
+                sortFoldersFirst=True)
+            self.search_tasks = (
+                ds.browser.SearchSubFolders("[{}]".format(ds.name), search_spec)
+                for ds in datastores)
+
+        try:
+            task = next(self.search_tasks)
+            print(task)
+        except StopIteration:
+            print("stop iteration")
+            self.search_tasks = None
+            return []
+        else:
+            self._wait_for_task(task, interval=0.4)
+
+        files = (
+            (files.folderPath, info)
+            for files in task.info.result
+            for info in files.file)
+        result = []
+        for folder_path, file_info in files:
+            full_path = self.driver._file_name_to_path(
+                '{}{}'.format(folder_path, file_info.path),
+                datastores_info=self.datastores_info)
+            result.append(_FileInfo(
+                path=full_path,
+                size=int(file_info.fileSize) / 1024,
+                owner=file_info.owner,
+                modification=file_info.modification))
+        return result
+
+    def extract_next_page_token(self, response):
+        return 1 if response else None
+
+    def _wait_for_task(self, task, timeout=1800, interval=10):
+        """
+        Wait for a vCenter task to finish.
+        """
+        start_time = time.time()
+        while True:
+            if time.time() - start_time >= timeout:
+                raise Exception((
+                    "Timeout while waiting for import task ID {}"
+                ).format(task.info.id))
+            if task.info.state == vim.TaskInfo.State.success:
+                return task.info.result
+            if task.info.state == vim.TaskInfo.State.error:
+                break
+            time.sleep(interval)
 
 
 class _FileInfo(object):
@@ -237,6 +351,17 @@ class _VMDiskInfo(object):
     @property
     def file_info(self):
         return _FileInfo(self.file_path, size=self.size)
+
+    @property
+    def is_root(self):
+        # The default SCSI controller is numbered as 0. When you create a
+        # virtual machine, the default hard disk is assigned to the default
+        # SCSI controller 0 at bus node (0:0).
+        # By default, the SCSI controller is assigned to virtual device
+        # node (z:7).
+        return self.scsi_host == 7 \
+            and self.scsi_bus == 0 \
+            and self.scsi_lun == 0
 
     def __repr__(self):
         return (
@@ -347,9 +472,8 @@ class VSphereNodeDriver(NodeDriver):
                 node.created_at = creation_times.get(node.id)
                 yield node
 
-        return VMwarePropertyCollectorPaginator(
-            self.connection,
-            object_cls=vim.VirtualMachine,
+        return VSpherePropertyCollector(
+            self, vim.VirtualMachine,
             path_set=[
                 'summary',
                 'summary.config',
@@ -382,9 +506,8 @@ class VSphereNodeDriver(NodeDriver):
                 image.created_at = creation_times.get(image.id)
                 yield image
 
-        return VMwarePropertyCollectorPaginator(
-            self.connection,
-            object_cls=vim.VirtualMachine,
+        return VSpherePropertyCollector(
+            self, vim.VirtualMachine,
             path_set=[
                 'summary.config',
             ],
@@ -396,35 +519,52 @@ class VSphereNodeDriver(NodeDriver):
         """
         List available volumes (on all datastores).
         """
+        return list(self.iterate_volumes())
+
+    def iterate_volumes(self, node=None):
+        """
+        Iterate available volumes (on all datastores).
+        """
         virtual_machine = self.ex_get_vm(node) if node is not None else None
 
-        # Search for VM's virtual disks
-        vm_disks = collections.defaultdict(list)
-        for vm_disk in self._query_vm_virtual_disks():
-            vm_disks[vm_disk.file_path].append(vm_disk)
+        # querying the virtual disks of node(s)
+        virtual_disks = collections.defaultdict(list)
+        for disk in self._query_vm_virtual_disks(
+                virtual_machine=virtual_machine):
+            virtual_disks[disk.file_path].append(disk)
 
-        # Search for *.vmdk files, clusterwide or on specified node
-        if node is None:
-            vmkd_files = self._query_datastore_files(vim.VmDiskFileQuery())
-        else:
-            vmkd_files = {disk[0].file_info for disk in vm_disks.values()}
-
-        # Create ``StorageVolume`` objects
-        volumes = [
-            self._to_volume(vmkd_file, devices=vm_disks.get(vmkd_file.path))
-            for vmkd_file in vmkd_files]
-
-        # Update ``StorageVolume`` creation timestamps
-        creation_times = self._query_volume_creation_times(
-            volumes,
+        # querying the creation timestamps of node(s) and volumes
+        node_creation_times = self._query_node_creation_times(
             virtual_machine=virtual_machine)
-        for volume in volumes:
-            volume.extra['created_at'] = creation_times.get(volume.id)
+        volume_creation_times = self._query_volume_creation_times(
+            virtual_machine=virtual_machine)
 
-        return volumes
+        def files_to_volumes(vmdk_files):
+            """
+            Converts a list of VMDK files to :class:`StorageVolume` objects.
+            """
+            for file_info in vmdk_files:
+                devices = virtual_disks.get(file_info.path) or []
+                volume = self._to_volume(file_info, devices=devices)
 
-    def iterate_volumes(self, ex_page_size=None):
-        raise NotImplementedError()
+                created_at = volume_creation_times.get(volume.id)
+                if not created_at:
+                    for device in devices:
+                        if not device.is_root:
+                            continue
+                        created_at = node_creation_times.get(device.owner_id)
+                volume.extra['created_at'] = created_at
+
+                yield volume
+
+        if virtual_machine:
+            # iterate over disks on the one virtual machine
+            vmdk_files = {disk[0].file_info for disk in virtual_disks.values()}
+            return files_to_volumes(vmdk_files)
+
+        return VCenterSearchFiles(
+            self, vim.VmDiskFileQuery(),
+            process_fn=files_to_volumes)
 
     def list_snapshots(self, ex_page_size=None):
         """
@@ -444,9 +584,8 @@ class VSphereNodeDriver(NodeDriver):
                 for snapshot_tree in self._walk_snapshot_tree(snapshot_trees):
                     yield self._to_snapshot(snapshot_tree, vm_properties)
 
-        return VMwarePropertyCollectorPaginator(
-            self.connection,
-            object_cls=vim.VirtualMachine,
+        return VSpherePropertyCollector(
+            self, vim.VirtualMachine,
             path_set=[
                 'snapshot.rootSnapshotList',
                 'layoutEx.snapshot',
@@ -490,43 +629,21 @@ class VSphereNodeDriver(NodeDriver):
             event.vm.vm._GetMoId(): event.createdTime
             for event in created_events}
 
-    def _query_volume_creation_times(self, volumes, virtual_machine=None):
+    def _query_volume_creation_times(self, virtual_machine=None):
         """
-        Fetches the creation dates of the volumes from the event history.
+        Fetches the creation dates of the extra volumes from the event history.
 
         :type volumes: list[:class:`Volumes`]
         :type virtual_machine: :class:`vim.VirtualMachine`
         :rtype: dict[str, :class:`datetime.datetime`]
         """
+        volume_creation_times = {}  # type: dict[str, datetime.datetime]
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
             entity=virtual_machine,
             page_size=1000,
         )  # type: list[vim.Event]
 
-        volume_creation_times = {}  # type: dict[str, datetime.datetime]
-        node_creation_times = self._query_node_creation_times(
-            virtual_machine=virtual_machine,
-        )  # type: list[vim.Event]
-
-        # 1. Root volumes
-        #
-        # The default SCSI controller is numbered as 0. When you create a
-        # virtual machine, the default hard disk is assigned to the default
-        # SCSI controller 0 at bus node (0:0).
-        # By default, the SCSI controller is assigned to virtual device
-        # node (z:7).
-        for volume in volumes:
-            volume_file = volume.extra['file_path']
-            for node_id, node_devices in volume.extra['devices'].items():
-                for device in node_devices:
-                    if device['scsi_host'] == 7 \
-                            and device['scsi_bus'] == 0 \
-                            and device['scsi_lun'] == 0:
-                        volume_creation_times[volume_file] = node_creation_times.get(node_id)
-                        continue
-
-        # 2. Extra volumes
         for event in reconfigure_events:  # lazy iterator with API pagination
             created_files = (
                 change.device.backing.fileName
@@ -534,13 +651,8 @@ class VSphereNodeDriver(NodeDriver):
                 if isinstance(change.device, vim.vm.device.VirtualDisk) \
                     and change.operation == 'add' \
                     and change.fileOperation == 'create')
-
             for created_file in created_files:
-                volume_creation_times.update({
-                    volume.extra['file_path']: event.createdTime
-                    for volume in volumes
-                    if volume.extra['file_path'] == created_file})
-
+                volume_creation_times[created_file] = event.createdTime
         return volume_creation_times
 
     def ex_get_vm(self, node_or_uuid):
@@ -559,22 +671,6 @@ class VSphereNodeDriver(NodeDriver):
             raise LibcloudError("Unable to locate VirtualMachine.")
         return vm
 
-    def _walk_folder(self, folder):
-        """
-        Recursively walks the specified folder and return a flat list of
-        all files found.
-
-        :type folder: :class:`vim.Folder`
-        :rtype: list
-        """
-        result = []
-        for item in folder.childEntity:
-            if isinstance(item, vim.Folder):
-                result.extend(self._walk_folder(item))
-            else:
-                result.append(item)
-        return result
-
     def _list_datacenters(self):
         """
         Returns list of datacenters.
@@ -583,10 +679,7 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: list[:class:`vim.Datacenter`]
         """
-        content = self._retrieve_content()
-        return [
-            entity for entity in content.rootFolder.childEntity
-            if isinstance(entity, vim.Datacenter)]
+        return list(VSpherePropertyCollector(self, vim.Datacenter))
 
     def _list_datastores(self):
         """
@@ -596,10 +689,21 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: list[:class:`vim.Datastore`]
         """
-        return [
-            entity for datacenter in self._list_datacenters()
-            for entity in datacenter.datastore
-            if isinstance(entity, vim.Datastore)]
+        return list(VSpherePropertyCollector(self, vim.Datastore))
+
+    def _list_datastores_info(self):
+        """
+        Returns the list of info about all datastores.
+
+        See: https://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.VmfsDatastoreInfo.html
+
+        :rtype: list[:class:`vim.VmfsDatastoreInfo`]
+        """
+        datastores = VSpherePropertyCollector(
+            self, vim.Datastore,
+            path_set=['info'],
+            process_fn=lambda res: (result['info'] for result in res.values()))
+        return list(datastores)
 
     def _retrieve_content(self):
         """
@@ -624,7 +728,7 @@ class VSphereNodeDriver(NodeDriver):
         datastore_name, file_path = match.group(1, 2)
 
         if datastores_info is None:
-            datastores_info = [ds.info for ds in self._list_datastores()]
+            datastores_info = self._list_datastores_info()
 
         for datastore_info in datastores_info:
             if datastore_info.name == datastore_name:
@@ -706,103 +810,7 @@ class VSphereNodeDriver(NodeDriver):
                 yield event
             events = history_collector.ReadPreviousEvents(page_size)
 
-    def _query_datastore_files(
-            self,
-            file_query,
-            datastores=None,
-            sort_folders_first=True,
-            raise_on_error=True):
-        """
-        Returns the information for the files that match the given search
-        criteria.
-
-        :param datastores: Search for the files, across specified datastores.
-        :type datastores: list[:class:`vim.Datastore`]
-
-        :param file_query: The set of file types to match, search criteria
-            specific to the file type, and the amount of detail for a file.
-            This parameter must be a subclass of :class:`vim.FileQuery`
-            (:class:`vim.VmDiskFileQuery`, :class:`vim.VmSnapshotFileQuery`,
-            :class:`vim.VmConfigFileQuery` etc.).
-        :type file_query: :class:`vim.FileQuery`
-
-        :param sort_folders_first: By default, files are sorted in alphabetical
-            order regardless of file type. If this flag is set to ``True``,
-            folders are placed at the start of the list of results in
-            alphabetical order. The remaining files follow in alphabetical
-            order. (``True`` by default)
-        :type sort_folders_first: bool
-
-        :param raise_on_error: Any exception from VMware task thrown is
-            thrown up to the caller if ``raise_on_error`` is set to ``True``.
-            (``True`` by default)
-        :type raise_on_error: bool
-
-        See:
-         - http://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.DatastoreBrowser.html
-         - https://pubs.vmware.com/vsphere-51/topic/com.vmware.wssdk.apiref.doc/vim.host.DatastoreBrowser.SearchSpec.html
-
-        :rtype: list[:class:`_FileInfo`]
-        """
-        if not isinstance(file_query, vim.FileQuery):
-            raise Exception("Unknown type of the file query")
-        if file_query.__class__ is vim.FileQuery:
-            raise Exception("Too broad type of the file query")
-
-        datastores = datastores or self._list_datastores()
-        datastores_info = [
-            datastore.info for datastore in datastores
-        ]  # type: list[vim.host.VmfsDatastoreInfo]
-
-        filter_query_flags = vim.FileQueryFlags(
-            fileSize=True,
-            fileType=True,
-            fileOwner=True,
-            modification=True)
-        search_spec = vim.HostDatastoreBrowserSearchSpec(
-            query=[file_query],
-            details=filter_query_flags,
-            sortFoldersFirst=sort_folders_first)
-        search_tasks = (
-            ds.browser.SearchSubFolders("[{}]".format(ds.name), search_spec)
-            for ds in datastores)
-
-        result = []  # type: list[_FileInfo]
-        for task in search_tasks:
-            self._wait_for_task(task, interval=0.4)
-
-            files = (
-                (files.folderPath, info)
-                for files in task.info.result
-                for info in files.file)
-            for folder_path, file_info in files:
-                full_path = self._file_name_to_path(
-                    '{}{}'.format(folder_path, file_info.path),
-                    datastores_info=datastores_info)
-                result.append(_FileInfo(
-                    path=full_path,
-                    size=int(file_info.fileSize) / 1024,
-                    owner=file_info.owner,
-                    modification=file_info.modification))
-        return result
-
-    def _wait_for_task(self, task, timeout=1800, interval=10):
-        """
-        Wait for a vCenter task to finish.
-        """
-        start_time = time.time()
-        while True:
-            if time.time() - start_time >= timeout:
-                raise Exception((
-                    "Timeout while waiting for import task ID {}"
-                ).format(task.info.id))
-            if task.info.state == vim.TaskInfo.State.success:
-                return task.info.result
-            if task.info.state == vim.TaskInfo.State.error:
-                break
-            time.sleep(interval)
-
-    def _query_vm_virtual_disks(self):
+    def _query_vm_virtual_disks(self, virtual_machine=None):
         """
         Return properties of :class:`vim.vm.device.VirtualDisk`.
 
@@ -814,9 +822,9 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: list[:class:`_VMDiskInfo`]
         """
-        datastores_info = [ds.info for ds in self._list_datastores()]
+        datastores_info = self._list_datastores_info()
 
-        def result_to_files(result):
+        def result_to_disks(result):
             vm_devices = []
             for vm_entity, vm_properties in result.items():
                 vm_id = vm_entity._GetMoId()
@@ -858,13 +866,22 @@ class VSphereNodeDriver(NodeDriver):
                     disk_info.scsi_lun = disk.unitNumber
                 yield disk_info
 
-        return VMwarePropertyCollectorPaginator(
-            connection=self.connection,
-            object_cls=vim.VirtualMachine,
+        if virtual_machine is not None:
+            config = virtual_machine.config
+            if not config:
+                return iter(())
+            result = {
+                virtual_machine: {
+                    'config.hardware.device': config.hardware.device
+                }}
+            return result_to_disks(result)
+
+        return VSpherePropertyCollector(
+            self, vim.VirtualMachine,
             path_set=[
                 'config.hardware.device',
             ],
-            process_fn=result_to_files,
+            process_fn=result_to_disks,
         )
 
     def ex_get_node_by_uuid(self, uuid):
