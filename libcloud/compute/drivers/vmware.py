@@ -23,6 +23,7 @@ import ipaddress
 import re
 import ssl
 import os
+import time
 
 try:
     import urlparse
@@ -768,7 +769,7 @@ class VSphereNodeDriver(NodeDriver):
 
         result = []  # type: list[_FileInfo]
         for task in search_tasks:
-            vmware_task.WaitForTask(task, raiseOnError=raise_on_error)
+            self._wait_for_task(task, interval=0.4)
 
             files = (
                 (files.folderPath, info)
@@ -784,6 +785,22 @@ class VSphereNodeDriver(NodeDriver):
                     owner=file_info.owner,
                     modification=file_info.modification))
         return result
+
+    def _wait_for_task(self, task, timeout=1800, interval=10):
+        """
+        Wait for a vCenter task to finish.
+        """
+        start_time = time.time()
+        while True:
+            if time.time() - start_time >= timeout:
+                raise Exception((
+                    "Timeout while waiting for import task ID {}"
+                ).format(task.info.id))
+            if task.info.state == vim.TaskInfo.State.success:
+                return task.info.result
+            if task.info.state == vim.TaskInfo.State.error:
+                break
+            time.sleep(interval)
 
     def _query_vm_virtual_disks(self):
         """
