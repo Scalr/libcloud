@@ -102,7 +102,7 @@ class _VMDiskInfo(object):
         :type summary: str
         :type sharing: bool
         :type disk_mode: str
-        :type scsi_host int:
+        :type scsi_host: int
         :type scsi_bus: int
         :type scsi_target int
         :type scsi_lun: int
@@ -268,14 +268,14 @@ class VSphereNodeDriver(NodeDriver):
 
         # Search for *.vmdk files, clusterwide or on specified node
         if node is None:
-            vmkd_files = self._query_datastore_files(vim.VmDiskFileQuery())
+            vmdk_files = self._query_datastore_files(vim.VmDiskFileQuery())
         else:
-            vmkd_files = {disk[0].file_info for disk in vm_disks.values()}
+            vmdk_files = {disk[0].file_info for disk in vm_disks.values()}
 
         # Create ``StorageVolume`` objects
         volumes = [
-            self._to_volume(vmkd_file, devices=vm_disks.get(vmkd_file.path))
-            for vmkd_file in vmkd_files]
+            self._to_volume(vmdk_file, devices=vm_disks.get(vmdk_file.path))
+            for vmdk_file in vmdk_files]
 
         # Update ``StorageVolume`` creation timestamps
         creation_times = self._query_volume_creation_times(
