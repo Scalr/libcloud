@@ -104,7 +104,7 @@ class _VMDiskInfo(object):
         :type disk_mode: str
         :type scsi_host: int
         :type scsi_bus: int
-        :type scsi_target int
+        :type scsi_target: int
         :type scsi_lun: int
         """
         self.disk_id = disk_id
