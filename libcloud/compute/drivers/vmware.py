@@ -69,7 +69,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
 
     def __init__(
             self, driver, object_cls, path_set=None,
-            process_fn=None, page_size=DEFAULT_PAGE_SIZE):
+            process_fn=None, page_size=None):
         """
         :param driver: The VSphere driver.
         :type driver: :class:`VSphereNodeDriver`
@@ -104,7 +104,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
         super(VSpherePropertyCollector, self).__init__(
             request_fn=self._retrieve_properties,
             process_fn=_process_fn,
-            page_size=page_size,
+            page_size=page_size or DEFAULT_PAGE_SIZE,
             request_args=[],
             request_kwargs={})
 
@@ -956,7 +956,7 @@ class VSphereNodeDriver(NodeDriver):
 
         node = Node(
             id=vm_entity._GetMoId(),
-            name=summary.config.name,
+            name=config.name,
             state=state,
             public_ips=public_ips,
             private_ips=private_ips,
