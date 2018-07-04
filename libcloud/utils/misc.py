@@ -24,7 +24,6 @@ import socket
 import ssl
 import sys
 import time
-import types
 from datetime import datetime
 from datetime import timedelta
 from functools import wraps
@@ -551,8 +550,7 @@ class PageList(object):
         Iterates over elements of all pages.
         """
         while self.has_more():
-            for item in self.page():
-                yield item
+            yield from self.page()
 
 
 class EmptyPageList(PageList):
