@@ -550,7 +550,8 @@ class PageList(object):
         Iterates over elements of all pages.
         """
         while self.has_more():
-            yield from self.page()
+            for item in self.page():
+                yield item
 
 
 class EmptyPageList(PageList):
