@@ -219,8 +219,7 @@ class VCenterFileSearch(misc_utils.PageList):
             request_kwargs={})
 
     def extract_next_page_token(self, response):
-        # Must return None to signalize that there are no more
-        # pages to request.
+        # return None if there are no more pages to request
         return 1 if response else None
 
     def _retrieve_files(self):
@@ -352,10 +351,16 @@ class _VMDiskInfo(object):
 
     @property
     def file_info(self):
+        """
+        :rtype: :class:`_FileInfo`
+        """
         return _FileInfo(self.file_path, size=self.size)
 
     @property
     def is_root(self):
+        """
+        :rtype: bool
+        """
         # The default SCSI controller is numbered as 0. When you create a
         # virtual machine, the default hard disk is assigned to the default
         # SCSI controller 0 at bus node (0:0).
@@ -375,7 +380,7 @@ class VSphereConnection(ConnectionUserAndKey):
     """
     Represents a single connection to the VSphere platform.
 
-    Note: Uses SOAP.
+    Note: Uses SOAP for communication.
     """
 
     def __init__(self, user_id, key, secure=True,
