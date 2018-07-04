@@ -173,15 +173,22 @@ class VSpherePropertyCollector(misc_utils.PageList):
         return content.propertyCollector, ([filter_spec], options)
 
 
-class VCenterSearchFiles(misc_utils.PageList):
+class VCenterFileSearch(misc_utils.PageList):
+    """
+    Search for the files that match the given search criteria.
+
+    See:
+        - http://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.DatastoreBrowser.html
+        - https://pubs.vmware.com/vsphere-51/topic/com.vmware.wssdk.apiref.doc/vim.host.DatastoreBrowser.SearchSpec.html
+
+    Returns a list of :class:`_FileInfo` paginated by datastores,
+    one datastore represents the one page of results.
+    """
 
     def __init__(self, driver, file_query, process_fn=None):
         """
-        Returns the information for the files that match the given search
-        criteria.
-
-        :param datastores: Search for the files, across specified datastores.
-        :type datastores: list[:class:`vim.Datastore`]
+        :param driver: The VSphere driver.
+        :type driver: :class:`VSphereNodeDriver`
 
         :param file_query: The set of file types to match, search criteria
             specific to the file type, and the amount of detail for a file.
@@ -190,65 +197,64 @@ class VCenterSearchFiles(misc_utils.PageList):
             :class:`vim.VmConfigFileQuery` etc.).
         :type file_query: :class:`vim.FileQuery`
 
-        :param sort_folders_first: By default, files are sorted in alphabetical
-            order regardless of file type. If this flag is set to ``True``,
-            folders are placed at the start of the list of results in
-            alphabetical order. The remaining files follow in alphabetical
-            order. (``True`` by default)
-        :type sort_folders_first: bool
-
-        :param raise_on_error: Any exception from VMware task thrown is
-            thrown up to the caller if ``raise_on_error`` is set to ``True``.
-            (``True`` by default)
-        :type raise_on_error: bool
-
-        See:
-         - http://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.DatastoreBrowser.html
-         - https://pubs.vmware.com/vsphere-51/topic/com.vmware.wssdk.apiref.doc/vim.host.DatastoreBrowser.SearchSpec.html
-
-        :rtype: list[:class:`_FileInfo`]
+        :param process_fn: Function to be applied to result page,
+            defaults to ``None``.
+        :param process_fn: callable or None
         """
         if not isinstance(file_query, vim.FileQuery):
             raise Exception("Unknown type of the file query")
         if file_query.__class__ is vim.FileQuery:
             raise Exception("Too broad type of the file query")
-        self.driver = driver
-        self.file_query = file_query
-        self.search_tasks = None
 
-        super(VCenterSearchFiles, self).__init__(
-            request_fn=self._retrieve_properties,
+        self._driver = driver  # type: VSphereNodeDriver
+        self._file_query = file_query  # type: vim.FileQuery
+        self._search_tasks = None  # type: Iterator
+        self._datastores_info = None  # type: list[vim.host.VmfsDatastoreInfo]
+
+        super(VCenterFileSearch, self).__init__(
+            request_fn=self._retrieve_files,
             process_fn=process_fn,
             page_size=None,
             request_args=[],
             request_kwargs={})
 
-    def _retrieve_properties(self):
-        if self.search_tasks is None:
-            datastores = self.driver._list_datastores()
-            self.datastores_info = [
-                datastore.info for datastore in datastores
-            ]  # type: list[vim.host.VmfsDatastoreInfo]
+    def extract_next_page_token(self, response):
+        # Must return None to signalize that there are no more
+        # pages to request.
+        return 1 if response else None
+
+    def _retrieve_files(self):
+        """
+        Retrieves the files the datastores.
+
+        :returns: The list of files from one datastore.
+        :rtype: list[:class:`_FileInfo`]
+        """
+        if self._search_tasks is None:
+            datastores = self._driver.ex_list_datastores()
+            datastores_info = [datastore.info for datastore in datastores]
             filter_query_flags = vim.FileQueryFlags(
                 fileSize=True,
                 fileType=True,
                 fileOwner=True,
                 modification=True)
             search_spec = vim.HostDatastoreBrowserSearchSpec(
-                query=[self.file_query],
+                query=[self._file_query],
                 details=filter_query_flags,
                 sortFoldersFirst=True)
-            self.search_tasks = (
-                ds.browser.SearchSubFolders("[{}]".format(ds.name), search_spec)
-                for ds in datastores)
 
+            self._search_tasks = (
+                ds.browser.SearchSubFolders('[{}]'.format(ds.name), search_spec)
+                for ds in datastores)
+            self._datastores_info = datastores_info
+
+        result = []
         try:
-            task = next(self.search_tasks)
-            print(task)
+            task = next(self._search_tasks)
         except StopIteration:
-            print("stop iteration")
-            self.search_tasks = None
-            return []
+            self._search_tasks = None
+            self._datastores_info = None
+            return result
         else:
             self._wait_for_task(task, interval=0.4)
 
@@ -256,20 +262,16 @@ class VCenterSearchFiles(misc_utils.PageList):
             (files.folderPath, info)
             for files in task.info.result
             for info in files.file)
-        result = []
         for folder_path, file_info in files:
-            full_path = self.driver._file_name_to_path(
-                '{}{}'.format(folder_path, file_info.path),
-                datastores_info=self.datastores_info)
+            full_path = self._driver.ex_file_name_to_path(
+                name='{}{}'.format(folder_path, file_info.path),
+                datastores_info=self._datastores_info)
             result.append(_FileInfo(
                 path=full_path,
                 size=int(file_info.fileSize) / 1024,
                 owner=file_info.owner,
                 modification=file_info.modification))
         return result
-
-    def extract_next_page_token(self, response):
-        return 1 if response else None
 
     def _wait_for_task(self, task, timeout=1800, interval=10):
         """
@@ -370,6 +372,11 @@ class _VMDiskInfo(object):
 
 
 class VSphereConnection(ConnectionUserAndKey):
+    """
+    Represents a single connection to the VSphere platform.
+
+    Note: Uses SOAP.
+    """
 
     def __init__(self, user_id, key, secure=True,
                  host=None, port=None, url=None, timeout=None, **kwargs):
@@ -423,7 +430,10 @@ class VSphereConnection(ConnectionUserAndKey):
 
 
 class VSphereNodeDriver(NodeDriver):
-    name = 'VMware vSphere'
+    """
+    VMWare VSphere node driver.
+    """
+    name = "VMware vSphere"
     website = 'http://www.vmware.com/products/vsphere/'
     type = Provider.VSPHERE
     connectionCls = VSphereConnection
@@ -562,7 +572,7 @@ class VSphereNodeDriver(NodeDriver):
             vmdk_files = {disk[0].file_info for disk in virtual_disks.values()}
             return files_to_volumes(vmdk_files)
 
-        return VCenterSearchFiles(
+        return VCenterFileSearch(
             self, vim.VmDiskFileQuery(),
             process_fn=files_to_volumes)
 
@@ -610,7 +620,7 @@ class VSphereNodeDriver(NodeDriver):
 
     def _query_node_creation_times(self, virtual_machine=None):
         """
-        Fetches the creation dates of the VMs from the event history.
+        Fetches the creation timestamps of the VMs from the event history.
 
         :type virtual_machine: :class:`vim.VirtualMachine`
         :rtype: dict[str, :class:`datetime.datetime`]
@@ -623,7 +633,8 @@ class VSphereNodeDriver(NodeDriver):
                 'VmClonedEvent'
             ],
             entity=virtual_machine,
-            page_size=1000)  # type: list[vim.Event]
+            page_size=1000,
+        )  # type: list[vim.Event]
         return {
             # pylint: disable=protected-access
             event.vm.vm._GetMoId(): event.createdTime
@@ -631,19 +642,19 @@ class VSphereNodeDriver(NodeDriver):
 
     def _query_volume_creation_times(self, virtual_machine=None):
         """
-        Fetches the creation dates of the extra volumes from the event history.
+        Fetches the creation timestamps of the extra volumes
+        from the event history.
 
-        :type volumes: list[:class:`Volumes`]
         :type virtual_machine: :class:`vim.VirtualMachine`
         :rtype: dict[str, :class:`datetime.datetime`]
         """
-        volume_creation_times = {}  # type: dict[str, datetime.datetime]
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
             entity=virtual_machine,
             page_size=1000,
         )  # type: list[vim.Event]
 
+        volume_creation_times = {}  # type: dict[str, datetime.datetime]
         for event in reconfigure_events:  # lazy iterator with API pagination
             created_files = (
                 change.device.backing.fileName
@@ -651,8 +662,9 @@ class VSphereNodeDriver(NodeDriver):
                 if isinstance(change.device, vim.vm.device.VirtualDisk) \
                     and change.operation == 'add' \
                     and change.fileOperation == 'create')
-            for created_file in created_files:
-                volume_creation_times[created_file] = event.createdTime
+            volume_creation_times.update({
+                created_file: event.createdTime
+                for created_file in created_files})
         return volume_creation_times
 
     def ex_get_vm(self, node_or_uuid):
@@ -671,7 +683,7 @@ class VSphereNodeDriver(NodeDriver):
             raise LibcloudError("Unable to locate VirtualMachine.")
         return vm
 
-    def _list_datacenters(self):
+    def ex_list_datacenters(self):
         """
         Returns list of datacenters.
 
@@ -681,7 +693,7 @@ class VSphereNodeDriver(NodeDriver):
         """
         return list(VSpherePropertyCollector(self, vim.Datacenter))
 
-    def _list_datastores(self):
+    def ex_list_datastores(self):
         """
         Returns the list of datastores.
 
@@ -691,7 +703,7 @@ class VSphereNodeDriver(NodeDriver):
         """
         return list(VSpherePropertyCollector(self, vim.Datastore))
 
-    def _list_datastores_info(self):
+    def ex_list_datastores_info(self):
         """
         Returns the list of info about all datastores.
 
@@ -715,9 +727,13 @@ class VSphereNodeDriver(NodeDriver):
         """
         return self.connection.client.RetrieveContent()
 
-    def _file_name_to_path(self, name, datastores_info=None):
+    def ex_file_name_to_path(self, name, datastores_info):
         """
         Converts file name to full path.
+
+        Example:
+          name: ``[ds.n1.c1.dc1] base-centos7.vmdk``
+          return: ``ds:///vmfs/volumes/<datastore-id>/base-centos7.vmdk``
 
         :type name: str
         :type datastores: list[:class:`vim.Datastore`]
@@ -726,9 +742,6 @@ class VSphereNodeDriver(NodeDriver):
         if not match:
             raise LibcloudError("Unecpected file name format: {}".format(name))
         datastore_name, file_path = match.group(1, 2)
-
-        if datastores_info is None:
-            datastores_info = self._list_datastores_info()
 
         for datastore_info in datastores_info:
             if datastore_info.name == datastore_name:
@@ -822,7 +835,7 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: list[:class:`_VMDiskInfo`]
         """
-        datastores_info = self._list_datastores_info()
+        datastores_info = self.ex_list_datastores_info()
 
         def result_to_disks(result):
             vm_devices = []
@@ -846,8 +859,8 @@ class VSphereNodeDriver(NodeDriver):
                 device_info = disk.deviceInfo
                 if not isinstance(backing, vim.vm.device.VirtualDevice.FileBackingInfo):
                     continue
-                file_path = self._file_name_to_path(
-                    backing.fileName,
+                file_path = self.ex_file_name_to_path(
+                    name=backing.fileName,
                     datastores_info=datastores_info)
                 disk_info = _VMDiskInfo(
                     disk_id=disk.diskObjectId,
