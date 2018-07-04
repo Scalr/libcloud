@@ -20,25 +20,10 @@ VMware vSphere driver using pyvmomi - https://github.com/vmware/pyvmomi
 import atexit
 import collections
 import ipaddress
+import os
 import re
 import ssl
-import os
 import time
-
-try:
-    import urlparse
-except ImportError:
-    import urllib.parse as urlparse
-
-try:
-    from pyVim import connect
-    from pyVim import task as vmware_task
-    from pyVmomi import vmodl
-    from pyVmomi import vim
-    from pyVmomi import vmodl
-except ImportError:
-    raise ImportError('Missing "pyvmomi" dependency. You can install it '
-                      'using pip - pip install pyvmomi')
 
 from libcloud.common.base import ConnectionUserAndKey
 from libcloud.common.types import InvalidCredsError
@@ -50,8 +35,19 @@ from libcloud.compute.base import StorageVolume
 from libcloud.compute.base import VolumeSnapshot
 from libcloud.compute.types import NodeState
 from libcloud.compute.types import Provider
-from libcloud.utils.networking import is_public_subnet
 from libcloud.utils import misc as misc_utils
+from libcloud.utils.networking import is_public_subnet
+from libcloud.utils.py3 import urlparse
+
+try:
+    from pyVim import connect
+    from pyVmomi import vmodl
+    from pyVmomi import vim
+    from pyVmomi import vmodl
+except ImportError:
+    raise ImportError(
+        "Missing 'pyvmomi' dependency. You can install it "
+        "using pip - 'pip install pyvmomi'")
 
 
 __all__ = [
