@@ -44,7 +44,7 @@ try:
     from pyVmomi import vmodl
     from pyVmomi import vim
     from pyVmomi import vmodl
-except ImportError:
+except ImportError:  # pragma: no cover
     raise ImportError(
         "Missing 'pyvmomi' dependency. You can install it "
         "using pip - 'pip install pyvmomi'")
@@ -56,7 +56,7 @@ __all__ = [
 
 
 DEFAULT_CONNECTION_TIMEOUT = 5  # default connection timeout in seconds
-DEFAULT_PAGE_SIZE = 10
+DEFAULT_PAGE_SIZE = 1000
 
 
 class VSpherePropertyCollector(misc_utils.PageList):
@@ -216,7 +216,7 @@ class VCenterFileSearch(misc_utils.PageList):
 
     def extract_next_page_token(self, response):
         # return None if there are no more pages to request
-        return 1 if response else None
+        return 1 if self._search_tasks is not None else None
 
     def _retrieve_files(self):
         """
@@ -250,8 +250,10 @@ class VCenterFileSearch(misc_utils.PageList):
             self._search_tasks = None
             self._datastores_info = None
             return result
-        else:
-            self._wait_for_task(task, interval=0.4)
+
+        if not self._wait_for_task(task, interval=0.4):
+            # unable to get files
+            return result
 
         files = (
             (files.folderPath, info)
@@ -271,6 +273,9 @@ class VCenterFileSearch(misc_utils.PageList):
     def _wait_for_task(self, task, timeout=1800, interval=10):
         """
         Wait for a vCenter task to finish.
+
+        :returns: Result if task is successfully completed, otherwise it
+            returns a ``None``.
         """
         start_time = time.time()
         while True:
@@ -281,7 +286,7 @@ class VCenterFileSearch(misc_utils.PageList):
             if task.info.state == vim.TaskInfo.State.success:
                 return task.info.result
             if task.info.state == vim.TaskInfo.State.error:
-                break
+                return
             time.sleep(interval)
 
 
@@ -418,14 +423,14 @@ class VSphereConnection(ConnectionUserAndKey):
         except Exception as e:
             message = '{}'.format(e)
             if 'incorrect user name' in message:
-                raise InvalidCredsError('Check that your username and '
-                                        'password are valid.')
-            if 'connection refused' in message \
-                    or 'is not a vim server' in message:
-                raise LibcloudError('Check that the host provided is a '
-                                    'vSphere installation.')
+                raise InvalidCredsError(
+                    "Check that your username and password are valid.")
+            if 'connection refused' in message or 'not a vim server' in message:
+                raise LibcloudError(
+                    "Check that the host provided is a vSphere installation.")
             if 'name or service not known' in message:
-                raise LibcloudError('Check that the vSphere host is accessible.')
+                raise LibcloudError(
+                    "Check that the vSphere host is accessible.")
 
         atexit.register(connect.Disconnect, self.client)
 
@@ -530,7 +535,7 @@ class VSphereNodeDriver(NodeDriver):
         """
         List available volumes (on all datastores).
         """
-        return list(self.iterate_volumes())
+        return list(self.iterate_volumes(node=node))
 
     def iterate_volumes(self, node=None):
         """
@@ -559,10 +564,10 @@ class VSphereNodeDriver(NodeDriver):
                 volume = self._to_volume(file_info, devices=devices)
 
                 created_at = volume_creation_times.get(volume.id)
-                if not created_at:
-                    for device in devices:
-                        if not device.is_root:
-                            continue
+                for device in devices:
+                    if created_at:
+                        break
+                    if device.is_root:
                         created_at = node_creation_times.get(device.owner_id)
                 volume.extra['created_at'] = created_at
 
@@ -634,7 +639,6 @@ class VSphereNodeDriver(NodeDriver):
                 'VmClonedEvent'
             ],
             entity=virtual_machine,
-            page_size=1000,
         )  # type: list[vim.Event]
         return {
             # pylint: disable=protected-access
@@ -652,7 +656,6 @@ class VSphereNodeDriver(NodeDriver):
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
             entity=virtual_machine,
-            page_size=1000,
         )  # type: list[vim.Event]
 
         volume_creation_times = {}  # type: dict[str, datetime.datetime]
@@ -858,7 +861,7 @@ class VSphereNodeDriver(NodeDriver):
             for vm_id, disk in virtual_disks:
                 backing = disk.backing
                 device_info = disk.deviceInfo
-                if not isinstance(backing, vim.vm.device.VirtualDevice.FileBackingInfo):
+                if not backing:
                     continue
                 file_path = self.ex_file_name_to_path(
                     name=backing.fileName,
@@ -1079,7 +1082,7 @@ class VSphereNodeDriver(NodeDriver):
             id=snapshot_tree.id,
             name=snapshot_tree.name,
             driver=self,
-            size=int(capacity_in_kb),
+            size=int(capacity_in_kb) if capacity_in_kb else None,
             extra=extra,
             created=snapshot_tree.createTime,
             state=None)
