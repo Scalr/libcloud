@@ -22,13 +22,6 @@ import pytz
 import sys
 import unittest
 
-try:
-    import cryptography
-except ImportError:
-    sys.modules['cryptography.hazmat.backends'] = mock.Mock()
-    sys.modules['cryptography.hazmat.primitives'] = mock.Mock()
-    sys.modules['cryptography.hazmat.primitives.asymmetric'] = mock.Mock()
-
 from libcloud.common.google import GoogleAuthType
 from libcloud.extra.drivers.google import BQConnection, BigQuery
 from libcloud.test import MockHttp, LibcloudTestCase
@@ -116,6 +109,7 @@ class BQConnectionTest(GoogleTestCase):
     Tests for GoogleBaseAuthConnection
     """
 
+    @mock.patch('libcloud.common.google.GoogleServiceAcctAuthConnection', mock.Mock())
     def setUp(self):
         self.project_id = "my_cool_project"
         self.conn = BQConnection(*GCE_PARAMS_PEM_KEY, project=self.project_id)
@@ -130,6 +124,7 @@ class BigQueryTest(GoogleTestCase):
     Tests for GoogleInstalledAppAuthConnection
     """
 
+    @mock.patch('libcloud.common.google.GoogleServiceAcctAuthConnection', mock.Mock())
     def setUp(self):
         self.project_id = "my_cool_project"
         BigQuery.connectionCls.conn_class = BigQueryMockHttp
