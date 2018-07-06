@@ -63,7 +63,7 @@ class PropertyCollectorMock(object):
 
     _objects = tuple()  # type: tuple
 
-    def __init__(self, *args, path_set=None, process_fn=None, **kwargs):
+    def __init__(self, driver, type, path_set=None, process_fn=None, **kwargs):
         self._path_set = path_set
         self._process_fn = process_fn
 

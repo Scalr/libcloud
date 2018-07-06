@@ -21,6 +21,7 @@ __all__ = [
     'is_private_subnet',
     'is_public_subnet',
     'is_valid_ip_address',
+    'is_valid_ipv4_address',
     'join_ipv4_segments',
     'increment_ipv4_segments'
 ]
@@ -89,6 +90,12 @@ def is_valid_ip_address(address, family=socket.AF_INET):
         return False
 
     return True
+
+
+def is_valid_ipv4_address(address):
+    if not is_valid_ip_address(address):
+        return False
+    return address.count('.') == 3
 
 
 def join_ipv4_segments(segments):

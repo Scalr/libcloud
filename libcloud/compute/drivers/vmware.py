@@ -19,7 +19,6 @@ VMware vSphere driver using pyvmomi - https://github.com/vmware/pyvmomi
 
 import atexit
 import collections
-import ipaddress
 import os
 import re
 import ssl
@@ -36,7 +35,7 @@ from libcloud.compute.base import VolumeSnapshot
 from libcloud.compute.types import NodeState
 from libcloud.compute.types import Provider
 from libcloud.utils import misc as misc_utils
-from libcloud.utils.networking import is_public_subnet
+from libcloud.utils import networking
 from libcloud.utils.py3 import urlparse
 
 try:
@@ -60,6 +59,7 @@ DEFAULT_PAGE_SIZE = 1000
 
 
 class VSpherePropertyCollector(misc_utils.PageList):
+    # pylint: disable=line-too-long
     """
     The paginated PropertyCollector.
 
@@ -170,6 +170,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
 
 
 class VCenterFileSearch(misc_utils.PageList):
+    # pylint: disable=line-too-long
     """
     Search for the files that match the given search criteria.
 
@@ -844,7 +845,7 @@ class VSphereNodeDriver(NodeDriver):
         def result_to_disks(result):
             vm_devices = []
             for vm_entity, vm_properties in result.items():
-                vm_id = vm_entity._GetMoId()
+                vm_id = vm_entity._GetMoId()  # pylint: disable=protected-access
                 for device in vm_properties.get('config.hardware.device') or []:
                     vm_devices.append((vm_id, device))
             virtual_disks = {
@@ -945,10 +946,9 @@ class VSphereNodeDriver(NodeDriver):
         public_ips = []
         private_ips = []
         if guest is not None and guest.ipAddress is not None:
-            ip_addr = ipaddress.ip_address(u'{}'.format(guest.ipAddress))
-            if isinstance(ip_addr, ipaddress.IPv4Address):
-                ip_addr = str(ip_addr)
-                if is_public_subnet(ip_addr):
+            ip_addr = u'{}'.format(guest.ipAddress)
+            if networking.is_valid_ipv4_address(ip_addr):
+                if networking.is_public_subnet(ip_addr):
                     public_ips.append(ip_addr)
                 else:
                     private_ips.append(ip_addr)
@@ -958,7 +958,7 @@ class VSphereNodeDriver(NodeDriver):
             NodeState.UNKNOWN)
 
         node = Node(
-            id=vm_entity._GetMoId(),
+            id=vm_entity._GetMoId(),  # pylint: disable=protected-access
             name=config.name,
             state=state,
             public_ips=public_ips,
