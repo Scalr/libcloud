@@ -520,7 +520,8 @@ class VSphereNodeDriver(NodeDriver):
                 if vm_properties['summary.config'].template is False:
                     continue
                 image = self._to_image(vm_entity, vm_properties)
-                image.created_at = creation_times.get(image.id)
+                image.created_at = creation_times.get(
+                    image.extra['managed_object_id'])
                 yield image
 
         return VSpherePropertyCollector(

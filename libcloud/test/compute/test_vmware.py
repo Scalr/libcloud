@@ -601,6 +601,28 @@ class VSphereNodeDriverTests(test.LibcloudTestCase):
         })
         self.assertEqual(nodes[0].created_at, create_time)
 
+    def test__to_image(self):
+        PropertyCollectorMock.set_objects(
+            self.create_virtual_machine(
+                id='vm-1111',
+                summary=create_mock(config=create_mock(
+                    template=True,
+                    uuid='vm-uuid',
+                )))
+        )
+        self.driver._query_node_creation_times = create_mock(return_value={
+            'vm-1111': 'time-1'
+        })
+
+        images = self.driver.list_images()
+
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0].id, 'vm-uuid')
+        self.assertEqual(images[0].extra, {
+            'managed_object_id': 'vm-1111',
+        })
+        self.assertEqual(images[0].created_at, 'time-1')
+
     def test__query_vm_virtual_disks(self):
         PropertyCollectorMock.set_objects(
             self.create_datastore(info=create_mock(
