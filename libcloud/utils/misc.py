@@ -563,7 +563,7 @@ class EmptyPageList(PageList):
     def __init__(self):
         super(EmptyPageList, self).__init__(lambda: [], (), {})
 
-    def extract_next_page_token(self):
+    def extract_next_page_token(self, response):
         return None
 
 

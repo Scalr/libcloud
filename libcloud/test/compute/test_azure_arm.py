@@ -27,9 +27,9 @@ import mock
 
 from libcloud.common.exceptions import BaseHTTPError
 from libcloud.common.types import LibcloudError
-from libcloud.compute.base import (NodeLocation, NodeSize, VolumeSnapshot,
-                                   StorageVolume)
-from libcloud.compute.drivers.azure_arm import AzureImage, NodeAuthPassword
+from libcloud.compute.base import (NodeLocation, NodeSize, NodeImage,
+                                   VolumeSnapshot, StorageVolume)
+from libcloud.compute.drivers.azure_arm import NodeAuthPassword
 from libcloud.compute.providers import get_driver
 from libcloud.compute.types import (NodeState, Provider, StorageVolumeState,
                                     VolumeSnapshotState)
@@ -103,7 +103,7 @@ class AzureNodeDriverTests(LibcloudTestCase):
     def test_create_node(self):
         location = NodeLocation('any_location', '', '', self.driver)
         size = NodeSize('any_size', '', 0, 0, 0, 0, driver=self.driver)
-        image = AzureImage('1', '1', 'ubuntu', 'pub', location.id, self.driver)
+        image = NodeImage('1', '1', self.driver)
         auth = NodeAuthPassword('any_password')
 
         node = self.driver.create_node(
@@ -133,10 +133,7 @@ class AzureNodeDriverTests(LibcloudTestCase):
         self.assertEqual(os_profile['adminPassword'], 'any_password')
         self.assertTrue('managedDisk' in storage_profile['osDisk'])
         self.assertTrue(storage_profile['imageReference'], {
-            'publisher': image.publisher,
-            'offer': image.offer,
-            'sku': image.sku,
-            'version': image.version
+            'id': image.id
         })
 
 
