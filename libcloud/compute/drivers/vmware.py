@@ -23,6 +23,8 @@ import os
 import re
 import ssl
 import time
+from datetime import datetime
+from datetime import timedelta
 
 from libcloud.common.base import ConnectionUserAndKey
 from libcloud.common.types import InvalidCredsError
@@ -80,10 +82,12 @@ class VSpherePropertyCollector(misc_utils.PageList):
         :param path_set: List of properties to retrieve, defaults to ``None``.
         :type path_set: list or None
 
-        :param page_size: [description], defaults to ``None``.
-        :param page_size: list or None
+        :param page_size: The size of the result page,
+            defaults to ``DEFAULT_PAGE_SIZE``.
+        :param page_size: int or None
 
-        :param process_fn: [description], defaults to ``None``.
+        :param process_fn: Function to be applied to the page result,
+            defaults to ``None``.
         :param process_fn: callable or None
         """
         self._connection = driver.connection
@@ -99,6 +103,10 @@ class VSpherePropertyCollector(misc_utils.PageList):
                 result = {
                     prop.obj: {prop.name: prop.val for prop in prop.propSet}
                     for prop in result.objects}
+            if isinstance(result, dict) and process_fn is None:
+                raise LibcloudError(
+                    "VSpherePropertyCollector: 'process_fn' parameter "
+                    "must be specified.")
             return process_fn(result) if process_fn else result
 
         super(VSpherePropertyCollector, self).__init__(
@@ -198,10 +206,10 @@ class VCenterFileSearch(misc_utils.PageList):
             defaults to ``None``.
         :param process_fn: callable or None
         """
-        if not isinstance(file_query, vim.FileQuery):
+        if not LibcloudError(file_query, vim.FileQuery):
             raise Exception("Unknown type of the file query")
         if file_query.__class__ is vim.FileQuery:
-            raise Exception("Too broad type of the file query")
+            raise LibcloudError("Too broad type of the file query")
 
         self._driver = driver  # type: VSphereNodeDriver
         self._file_query = file_query  # type: vim.FileQuery
@@ -470,6 +478,8 @@ class VSphereNodeDriver(NodeDriver):
     def list_nodes(self, ex_page_size=None):
         """
         Lists available nodes (excluding templates).
+
+        :rtype: list[Node]
         """
         return list(self.iterate_nodes(
             ex_page_size=ex_page_size,
@@ -478,16 +488,20 @@ class VSphereNodeDriver(NodeDriver):
     def iterate_nodes(self, ex_page_size=None):
         """
         Iterate available nodes (excluding templates).
+
+        :rtype: collections.Iterable[Node]
         """
         creation_times = self._query_node_creation_times()
 
         def result_to_nodes(result):
+            nodes = []
             for vm_entity, vm_properties in result.items():
                 if vm_properties['summary.config'].template is True:
                     continue
                 node = self._to_node(vm_entity, vm_properties)
                 node.created_at = creation_times.get(node.id)
-                yield node
+                nodes.append(node)
+            return nodes
 
         return VSpherePropertyCollector(
             self, vim.VirtualMachine,
@@ -504,6 +518,8 @@ class VSphereNodeDriver(NodeDriver):
     def list_images(self, ex_page_size=None):
         """
         List available images (templates).
+
+        :rtype: list[Image]
         """
         return list(self.iterate_images(
             ex_page_size=ex_page_size,
@@ -512,17 +528,21 @@ class VSphereNodeDriver(NodeDriver):
     def iterate_images(self, ex_page_size=None):
         """
         Iterate available images (templates).
+
+        :rtype: collections.Iterable[Image]
         """
         creation_times = self._query_node_creation_times()
 
         def result_to_images(result):
+            images = []
             for vm_entity, vm_properties in result.items():
                 if vm_properties['summary.config'].template is False:
                     continue
                 image = self._to_image(vm_entity, vm_properties)
                 image.created_at = creation_times.get(
                     image.extra['managed_object_id'])
-                yield image
+                images.append(image)
+            return images
 
         return VSpherePropertyCollector(
             self, vim.VirtualMachine,
@@ -536,12 +556,16 @@ class VSphereNodeDriver(NodeDriver):
     def list_volumes(self, node=None):
         """
         List available volumes (on all datastores).
+
+        :rtype: list[StorageVolume]
         """
         return list(self.iterate_volumes(node=node))
 
     def iterate_volumes(self, node=None):
         """
         Iterate available volumes (on all datastores).
+
+        :rtype: collections.Iterable[StorageVolume]
         """
         virtual_machine = self.ex_get_vm(node) if node is not None else None
 
@@ -561,6 +585,7 @@ class VSphereNodeDriver(NodeDriver):
             """
             Converts a list of VMDK files to :class:`StorageVolume` objects.
             """
+            volumes = []
             for file_info in vmdk_files:
                 devices = virtual_disks.get(file_info.path) or []
                 volume = self._to_volume(file_info, devices=devices)
@@ -573,20 +598,23 @@ class VSphereNodeDriver(NodeDriver):
                         created_at = node_creation_times.get(device.owner_id)
                 volume.extra['created_at'] = created_at
 
-                yield volume
+                volumes.append(volume)
+            return volumes
 
         if virtual_machine:
             # iterate over disks on the one virtual machine
             vmdk_files = {disk[0].file_info for disk in virtual_disks.values()}
             return files_to_volumes(vmdk_files)
 
-        return VCenterFileSearch(
+        return iter(VCenterFileSearch(
             self, vim.VmDiskFileQuery(),
-            process_fn=files_to_volumes)
+            process_fn=files_to_volumes))
 
     def list_snapshots(self, ex_page_size=None):
         """
         List available snapshots.
+
+        :rtype: list[VolumeSnapshot]
         """
         return list(self.iterate_snapshots(
             ex_page_size=ex_page_size,
@@ -595,12 +623,17 @@ class VSphereNodeDriver(NodeDriver):
     def iterate_snapshots(self, ex_page_size=None):
         """
         Iterate available snapshots.
+
+        :rtype: collections.Iterable[VolumeSnapshot]
         """
         def result_to_snapshots(result):
+            snapshots = []
             for vm_properties in result.values():
                 snapshot_trees = vm_properties.get('snapshot.rootSnapshotList')
-                for snapshot_tree in self._walk_snapshot_tree(snapshot_trees):
-                    yield self._to_snapshot(snapshot_tree, vm_properties)
+                snapshots.extend([
+                    self._to_snapshot(snap_tree, vm_properties)
+                    for snap_tree in self._walk_snapshot_tree(snapshot_trees)])
+            return snapshots
 
         return VSpherePropertyCollector(
             self, vim.VirtualMachine,
@@ -641,6 +674,7 @@ class VSphereNodeDriver(NodeDriver):
                 'VmClonedEvent'
             ],
             entity=virtual_machine,
+            begin_time=datetime.now() - timedelta(days=30)
         )  # type: list[vim.Event]
         return {
             # pylint: disable=protected-access
@@ -658,6 +692,7 @@ class VSphereNodeDriver(NodeDriver):
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
             entity=virtual_machine,
+            begin_time=datetime.now() - timedelta(days=30)
         )  # type: list[vim.Event]
 
         volume_creation_times = {}  # type: dict[str, datetime.datetime]
@@ -720,7 +755,7 @@ class VSphereNodeDriver(NodeDriver):
         datastores = VSpherePropertyCollector(
             self, vim.Datastore,
             path_set=['info'],
-            process_fn=lambda res: (result['info'] for result in res.values()))
+            process_fn=lambda res: [result['info'] for result in res.values()])
         return list(datastores)
 
     def _retrieve_content(self):
@@ -844,6 +879,7 @@ class VSphereNodeDriver(NodeDriver):
         datastores_info = self.ex_list_datastores_info()
 
         def result_to_disks(result):
+            disks_info = []
             vm_devices = []
             for vm_entity, vm_properties in result.items():
                 vm_id = vm_entity._GetMoId()  # pylint: disable=protected-access
@@ -883,7 +919,8 @@ class VSphereNodeDriver(NodeDriver):
                     disk_info.scsi_bus = scsi_controller['bus_number']
                     disk_info.scsi_target = disk.controllerKey
                     disk_info.scsi_lun = disk.unitNumber
-                yield disk_info
+                disks_info.append(disk_info)
+            return disks_info
 
         if virtual_machine is not None:
             config = virtual_machine.config
