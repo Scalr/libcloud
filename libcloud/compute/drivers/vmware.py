@@ -604,7 +604,7 @@ class VSphereNodeDriver(NodeDriver):
         if virtual_machine:
             # iterate over disks on the one virtual machine
             vmdk_files = {disk[0].file_info for disk in virtual_disks.values()}
-            return files_to_volumes(vmdk_files)
+            return iter(files_to_volumes(vmdk_files))
 
         return iter(VCenterFileSearch(
             self, vim.VmDiskFileQuery(),
