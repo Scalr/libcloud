@@ -215,7 +215,7 @@ class AzureResourceManagementConnection(ConnectionUserAndKey):
         return super(AzureResourceManagementConnection, self).connect(**kwargs)
 
     def request(self, action, params=None, data=None, headers=None,
-                method='GET', raw=False):
+                method='GET', raw=False, stream=False):
 
         # Log in again if the token has expired or is going to expire soon
         # (next 5 minutes).
@@ -225,4 +225,11 @@ class AzureResourceManagementConnection(ConnectionUserAndKey):
         return super(AzureResourceManagementConnection, self) \
             .request(action, params=params,
                      data=data, headers=headers,
-                     method=method, raw=raw)
+                     method=method, raw=raw, stream=stream)
+
+    def pre_connect_hook(self, params, headers):
+        # Azure redirects some requests to different hosts,
+        # but requests does not removes this old Host header
+        headers.pop('Host', None)
+
+        return params, headers

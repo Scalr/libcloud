@@ -21,9 +21,10 @@ http://azure.microsoft.com/en-us/services/virtual-machines/
 
 import base64
 import binascii
-import uuid
 import os
 import time
+
+import six
 
 from libcloud.common.azure_arm import AzureResourceManagementConnection
 from libcloud.compute.providers import Provider
@@ -1277,8 +1278,8 @@ class AzureNodeDriver(NodeDriver):
             },
         )
 
-    def ex_get_ratecard(self, offer_durable_id, currency='USD',
-                        locale='en-US', region='US'):
+    def ex_get_rate_card(self, offer_durable_id, currency='USD',
+                         locale='en-US', region='US', api_version='2015-06-01-preview'):
         """
         Get rate card
 
@@ -1294,20 +1295,86 @@ class AzureNodeDriver(NodeDriver):
         :type locale: ``str``
 
         :param region: Region (two-letter code) (default: "US")
-        :type regions: ``str``
+        :type region: ``str``
 
-        :return: A dictionary of rates whose ID's correspond to nothing at all
+        :param api_version: API version
+        :type api_version: ``str``
+
+        :return: A dictionary of rates
         :rtype: ``dict``
         """
 
         action = "/subscriptions/%s/providers/Microsoft.Commerce/" \
                  "RateCard" % (self.subscription_id,)
-        params = {"api-version": "2016-08-31-preview",
+        params = {"api-version": api_version,
                   "$filter": "OfferDurableId eq 'MS-AZR-%s' and "
                              "Currency eq '%s' and "
                              "Locale eq '%s' and "
                              "RegionInfo eq '%s'" %
                              (offer_durable_id, currency, locale, region)}
+        r = self.connection.request(action, params=params)
+        return r.object
+
+    def ex_iterate_usage_aggregates(self, reported_start_time, reported_end_time,
+                                    resolution='Hourly', show_details=True,
+                                    usage_api_version='2015-06-01-preview'):
+
+        """Get usage aggregate data for provided period.
+
+        :param reported_start_time: billing period start time
+        :type reported_start_time: datetime.datetime
+
+        :param reported_end_time: billing period end time
+        :type reported_end_time: datetime.datetime
+
+        :param resolution: 'Hourly' or 'Daily' aggregation results
+        :type resolution: str
+
+        :param show_details: instance-level details with the usage data
+        :type show_details: bool
+
+        :param usage_api_version: Usage API version
+        :type usage_api_version: str
+
+        :return: 1000 usage records (Azure API limit, not configurable)
+        :rtype: typing.Iterator[typing.Dict]
+        """
+
+        params = {
+            'aggregationGranularity': resolution,
+            'api-version': usage_api_version,
+            'reportedStartTime': reported_start_time.strftime('%Y-%m-%dT%H:%M:%S+00:00'),
+            'reportedEndTime': reported_end_time.strftime('%Y-%m-%dT%H:%M:%S+00:00'),
+            'showDetails': 'true' if show_details else 'false',
+        }
+        action = '/subscriptions/%s/providers/Microsoft.Commerce/' \
+                 'UsageAggregates' % self.subscription_id
+
+        while True:
+            r = self.connection.request(action, params=params)
+
+            yield r.object
+
+            next_link = r.object.get('nextLink')
+            if not next_link:
+                break
+
+            parsed_url = six.moves.urllib.parse.urlparse(next_link)
+            params = six.moves.urllib.parse.parse_qs(parsed_url.query)
+
+    def ex_get_active_billing_period(self, api_version='2017-04-24-preview'):
+        """Get subscription active billing period
+
+        :param str api_version: api version
+        :rtype: dict
+        """
+        action = '/subscriptions/%s/providers/Microsoft.Billing/' \
+                 'billingPeriods' % self.subscription_id
+
+        params = {
+            'api-version': api_version,
+            '$top': 1
+        }
         r = self.connection.request(action, params=params)
         return r.object
 
