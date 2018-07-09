@@ -24,7 +24,6 @@ import socket
 import ssl
 import sys
 import time
-import types
 from datetime import datetime
 from datetime import timedelta
 from functools import wraps
