@@ -1307,7 +1307,7 @@ class AzureNodeDriver(NodeDriver):
         action = "/subscriptions/%s/providers/Microsoft.Commerce/" \
                  "RateCard" % (self.subscription_id,)
         params = {"api-version": api_version,
-                  "$filter": "OfferDurableId eq 'MS-AZR-%s' and "
+                  "$filter": "OfferDurableId eq '%s' and "
                              "Currency eq '%s' and "
                              "Locale eq '%s' and "
                              "RegionInfo eq '%s'" %
