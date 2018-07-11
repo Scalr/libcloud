@@ -288,7 +288,7 @@ class AzureNodeDriver(NodeDriver):
         :type location: :class:`.NodeLocation`
 
         :return: list of node image objects.
-        :rtype: ``list`` of :class:`.AzureImage`
+        :rtype: ``list`` of :class:`.NodeImage`
         """
 
         if ex_resource_group:
@@ -326,9 +326,8 @@ class AzureNodeDriver(NodeDriver):
         (if None, use default location specified as 'region' in __init__)
         :type location: :class:`.NodeLocation`
 
-        :rtype :class:`.AzureImage`: or :class:`.AzureVhdImage`:
-        :return: AzureImage or AzureVhdImage instance on success.
-
+        :rtype :class:`.NodeImage`: or :class:`.AzureVhdImage`:
+        :return: NodeImage or AzureVhdImage instance on success.
         """
 
         if image_id.startswith("http"):
@@ -442,7 +441,7 @@ class AzureNodeDriver(NodeDriver):
         :type size:   :class:`.NodeSize`
 
         :param image:  OS Image to boot on node. (required)
-        :type image:  :class:`.AzureImage`
+        :type image:  :class:`.NodeImage`
 
         :param location: Which data center to create a node in.
         (if None, use default location specified as 'region' in __init__)
@@ -587,7 +586,7 @@ class AzureNodeDriver(NodeDriver):
                 }
         else:
             raise LibcloudError(
-                "Unknown image type %s, expected one of AzureImage, "
+                "Unknown image type %s, expected one of NodeImage, "
                 "AzureVhdImage." % type(image))
 
         data = {
