@@ -206,8 +206,8 @@ class VCenterFileSearch(misc_utils.PageList):
             defaults to ``None``.
         :param process_fn: callable or None
         """
-        if not LibcloudError(file_query, vim.FileQuery):
-            raise Exception("Unknown type of the file query")
+        if not isinstance(file_query, vim.FileQuery):
+            raise LibcloudError("Unknown type of the file query")
         if file_query.__class__ is vim.FileQuery:
             raise LibcloudError("Too broad type of the file query")
 
