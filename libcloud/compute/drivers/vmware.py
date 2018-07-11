@@ -59,6 +59,12 @@ __all__ = [
 DEFAULT_CONNECTION_TIMEOUT = 5  # default connection timeout in seconds
 DEFAULT_PAGE_SIZE = 1000
 
+"""
+VMWare vCenter Server stores events in the database for a limited period.
+The default number of days to retain event messages in the database is 30.
+"""
+EVENTS_DAYS_LIMIT = 30
+
 
 class VSpherePropertyCollector(misc_utils.PageList):
     # pylint: disable=line-too-long
@@ -674,7 +680,7 @@ class VSphereNodeDriver(NodeDriver):
                 'VmClonedEvent'
             ],
             entity=virtual_machine,
-            begin_time=datetime.now() - timedelta(days=30)
+            begin_time=datetime.now() - timedelta(days=EVENTS_DAYS_LIMIT)
         )  # type: list[vim.Event]
         return {
             # pylint: disable=protected-access
@@ -692,7 +698,7 @@ class VSphereNodeDriver(NodeDriver):
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
             entity=virtual_machine,
-            begin_time=datetime.now() - timedelta(days=30)
+            begin_time=datetime.now() - timedelta(days=EVENTS_DAYS_LIMIT)
         )  # type: list[vim.Event]
 
         volume_creation_times = {}  # type: dict[str, datetime.datetime]
