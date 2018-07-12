@@ -15,7 +15,8 @@
 
 __all__ = [
     'Provider',
-    'ContainerState'
+    'ContainerState',
+    'ClusterState'
 ]
 
 
@@ -49,6 +50,7 @@ class Provider(object):
     DUMMY = 'dummy'
     DOCKER = 'docker'
     ECS = 'ecs'
+    EKS = 'eks'
     GKE = 'GKE'
     JOYENT = 'joyent'
     KUBERNETES = 'kubernetes'
@@ -82,3 +84,17 @@ class ContainerState(Type):
     SUSPENDED = 'suspended'
     ERROR = 'error'
     PAUSED = 'paused'
+
+
+class ClusterState(Type):
+    """
+    Standard states for a cluster.
+
+    :cvar ACTIVE: Cluster is running.
+    :cvar CREATING: Cluster is being created.
+    :cvar DELETING : Cluster is terminating.
+                This container can't be started later on.
+    """
+    CREATING = 'CREATING'
+    ACTIVE = 'ACTIVE'
+    DELETING = 'DELETING'
