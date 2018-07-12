@@ -313,7 +313,7 @@ class _FileInfo(object):
     def __init__(self, path, size=None, owner=None, modification=None):
         """
         :param str path: The path to the file.
-        :param int size: The size of the file in kilobytes.
+        :param int size: The size of the file in **kilobytes**.
         :param str owner: The user name of the owner of the file.
         :param :class:`datetime.datetime` modification: The last date and time
             the file was modified.
@@ -322,6 +322,10 @@ class _FileInfo(object):
         self.size = size
         self.owner = owner
         self.modification = modification
+
+    @property
+    def size_in_gb(self):
+        return self.size / (1024.0 ** 2)
 
     def __repr__(self):
         return (
@@ -342,7 +346,7 @@ class _VMDiskInfo(object):
         :param str disk_id: Virtual disk durable and unmutable identifier.
         :param str owner_id: ID of the owner VM.
         :param str file_path : Path to the host file used in disk backing.
-        :param int size: Capacity of this virtual disk in kilobytes.
+        :param int size: Capacity of this virtual disk in **kilobytes**.
         :type label: str
         :type summary: str
         :type sharing: bool
@@ -1068,7 +1072,7 @@ class VSphereNodeDriver(NodeDriver):
         return StorageVolume(
             id=file_info.path,
             name=os.path.basename(file_info.path),
-            size=file_info.size,
+            size=round(file_info.size_in_gb, 1),
             driver=self,
             extra=extra)
 
@@ -1117,16 +1121,16 @@ class VSphereNodeDriver(NodeDriver):
             snapshot_data_keys = [
                 item.dataKey for item in snapshot_layout
                 if item.key == snapshot]
-            capacity_in_kb = sum(
+            capacity_in_gb = sum(
                 disk.size for disk in file_layout
                 if disk.key in snapshot_data_keys and disk.type == 'snapshotData'
-            ) / 1024.0
+            ) / (1024.0 ** 3)
 
         return VolumeSnapshot(
             id=snapshot_tree.id,
             name=snapshot_tree.name,
             driver=self,
-            size=int(capacity_in_kb) if capacity_in_kb else None,
+            size=round(capacity_in_gb, 1) if capacity_in_gb else None,
             extra=extra,
             created=snapshot_tree.createTime,
             state=None)
