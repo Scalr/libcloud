@@ -4440,7 +4440,8 @@ class BaseEC2NodeDriver(NodeDriver):
         response = self.connection.request(self.path, params=params).object
         return self._get_boolean(response)
 
-    def ex_describe_reserved_instances_offerings(self, params=None, filters=None, ids=None):
+    def ex_describe_reserved_instances_offerings(self, params=None, filters=None, ids=None,
+                                                 limit=1000):
         """Describes Reserved Instance offerings that are available for purchase.
 
         Details: https://amzn.to/2rsdMA0
@@ -4460,9 +4461,11 @@ class BaseEC2NodeDriver(NodeDriver):
         :param ids: list with reserved instances offerings IDs.
         :type ids: list
 
-        :return: dict with items as list of ``EC2ReservedInstanceOffering`` and nextToken value.
-            nextToken than can be used to retrieve next page of results.
-        :rtype: dict
+        :param limit: limit the number of offerings. If None or 0 - do not limit the result.
+        :type limit: int
+
+        :return: list of ``EC2ReservedInstanceOffering``.
+        :rtype: list
         """
         req_params = {'Action': 'DescribeReservedInstancesOfferings'}
 
@@ -4475,11 +4478,24 @@ class BaseEC2NodeDriver(NodeDriver):
         if params:
             req_params.update(params)
 
-        response = self.connection.request(self.path, params=req_params).object
-        return {
-            'items': self._to_reserved_instances_offerings(response),
-            'next_token': findtext(response, xpath='nextToken', namespace=NAMESPACE)
-            }
+        ri_offerings = []
+        for offerings in self._ex_iterate_reserved_instances_offerings(req_params):
+            ri_offerings.extend(offerings)
+
+            if limit and len(ri_offerings) >= limit:
+                ri_offerings = ri_offerings[:limit]
+                break
+
+        return ri_offerings
+
+    def _ex_iterate_reserved_instances_offerings(self, params):
+        next_page_token = ''
+
+        while next_page_token is not None:
+            response = self.connection.request(self.path, params=params).object
+            next_page_token = findtext(response, xpath='nextToken', namespace=NAMESPACE) or None
+            yield self._to_reserved_instances_offerings(response)
+            params['NextToken'] = next_page_token
 
     def _to_reserved_instances_offerings(self, response):
         return [self._to_reserved_instance_offering(el) for el in response.findall(
@@ -4499,7 +4515,7 @@ class BaseEC2NodeDriver(NodeDriver):
                                                          namespace=NAMESPACE)
                                       })
         params['recurring_charges'] = recurring_charges
-        params['region'] = self.region
+        params['region'] = self.region_name
 
         return EC2ReservedInstancesOffering(**params)
 
