@@ -42,7 +42,7 @@ from libcloud.compute.base import (NodeDriver, Node, NodeLocation,
                                    StorageVolume, VolumeSnapshot)
 from libcloud.compute.base import KeyPair
 from libcloud.compute.types import NodeState, StorageVolumeState, Provider, \
-    VolumeSnapshotState
+    VolumeSnapshotState, LibcloudError
 from libcloud.pricing import get_size_price
 from libcloud.utils.xml import findall
 from libcloud.utils.py3 import ET
@@ -216,7 +216,12 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
                                must have admin privileges for this
                                functionality to work.
         :type ex_all_tenants: ``bool``
+        :param ex_page_size: Request page size.
+        :type ex_page_size: ``int``
         """
+        if ex_page_size <= 0:
+            raise LibcloudError(
+                'Invalid ex_page_size param: {}'.format(ex_page_size))
         params = {}
         if ex_all_tenants:
             params = {'all_tenants': 1}
@@ -319,6 +324,14 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
         return list(self.iterate_volumes(*args, **kwargs))
 
     def iterate_volumes(self, ex_page_size=DEFAULT_PAGE_SIZE):
+        """
+        :param ex_page_size: Request page size.
+        :type ex_page_size: ``int``
+        """
+        if ex_page_size <= 0:
+            raise LibcloudError(
+                'Invalid ex_page_size param: {}'.format(ex_page_size))
+
         volume_paginator = OpenstackVolExtPageList(
             self.connection.request,
             ('/os-volumes',),
@@ -344,7 +357,13 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
         :param ex_only_active: True if list only active
         :type ex_only_active: ``bool``
 
+        :param ex_page_size: Request page size.
+        :type ex_page_size: ``int``
         """
+        if ex_page_size <= 0:
+            raise LibcloudError(
+                'Invalid ex_page_size param: {}'.format(ex_page_size))
+
         image_paginator = OpenStackPageList(
             self.connection.request,
             ('/images/detail',),
@@ -1730,6 +1749,14 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
         return list(self.ex_iterate_snapshots(*args, **kwargs))
 
     def ex_iterate_snapshots(self, ex_page_size=DEFAULT_PAGE_SIZE):
+        """
+        :param ex_page_size: Request page size.
+        :type ex_page_size: ``int``
+        """
+        if ex_page_size <= 0:
+            raise LibcloudError(
+                'Invalid ex_page_size param: {}'.format(ex_page_size))
+
         snapshot_paginator = OpenstackVolExtPageList(
             self.connection.request,
             ('/os-snapshots',),
