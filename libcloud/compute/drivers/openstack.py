@@ -91,16 +91,21 @@ class OpenStackPageList(misc_utils.PageList):
             return self.current_page[-1].id
 
 
-class VolumePageList(OpenStackPageList):
+class OpenstackVolExtPageList(OpenStackPageList):
+    """
+    Encapsulates an old style of pagination on Openstack. Used for volumes and
+    snapshots.
+    https://developer.openstack.org/api-ref/compute/#list-volumes
+    """
     page_token_name = 'offset'
 
     def __init__(self, *args, **kwargs):
-        super(VolumePageList, self).__init__(*args, **kwargs)
+        super(OpenstackVolExtPageList, self).__init__(*args, **kwargs)
         self.page_num = 0
 
     def page(self, *args, **kwargs):
         self.page_num += 1
-        return super(VolumePageList, self).page(*args, **kwargs)
+        return super(OpenstackVolExtPageList, self).page(*args, **kwargs)
 
     def extract_next_page_token(self, response):
         if self.current_page and len(self.current_page) >= self.page_size:
@@ -314,7 +319,7 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
         return list(self.iterate_volumes(*args, **kwargs))
 
     def iterate_volumes(self, ex_page_size=DEFAULT_PAGE_SIZE):
-        volume_paginator = VolumePageList(
+        volume_paginator = OpenstackVolExtPageList(
             self.connection.request,
             ('/os-volumes',),
             {},
@@ -1725,7 +1730,7 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
         return list(self.ex_iterate_snapshots(*args, **kwargs))
 
     def ex_iterate_snapshots(self, ex_page_size=DEFAULT_PAGE_SIZE):
-        snapshot_paginator = OpenStackPageList(
+        snapshot_paginator = OpenstackVolExtPageList(
             self.connection.request,
             ('/os-snapshots',),
             {},
