@@ -1115,7 +1115,7 @@ class VSphereNodeDriver(NodeDriver):
         }
 
         if snapshot_layout is None or file_layout is None:
-            capacity_in_kb = None
+            capacity_in_gb = None
         else:
             snapshot = snapshot_tree.snapshot
             snapshot_data_keys = [
