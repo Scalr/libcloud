@@ -76,7 +76,8 @@ class VSpherePropertyCollector(misc_utils.PageList):
     """
 
     def __init__(
-            self, driver, object_cls, path_set=None,
+            self, driver, object_cls,
+            container=None, path_set=None,
             process_fn=None, page_size=None):
         """
         :param driver: The VSphere driver.
@@ -84,6 +85,10 @@ class VSpherePropertyCollector(misc_utils.PageList):
 
         :param object_cls: Type of managed object.
         :type object_cls: :class:`vim.ManagedEntity`
+
+        :param container: The :class:`vim.Folder` or :class:`vim.Datacenter`
+            instance that provides the objects that the view presents.
+        :type container: :class:`vim.Folder` or :class:`vim.Datacenter`
 
         :param path_set: List of properties to retrieve, defaults to ``None``.
         :type path_set: list or None
@@ -99,6 +104,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
         self._connection = driver.connection
         self._object_cls = object_cls
         self._path_set = path_set
+        self._container = container
         self._collector = None
 
         def _process_fn(result):
@@ -145,7 +151,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
         """
         content = self._connection.client.RetrieveContent()
         container_view = content.viewManager.CreateContainerView(
-            container=content.rootFolder,
+            container=self._container or content.rootFolder,
             type=[self._object_cls],
             recursive=True,
         )  # type: vim.view.ContainerView
@@ -485,22 +491,38 @@ class VSphereNodeDriver(NodeDriver):
 
         return kwargs
 
-    def list_nodes(self, ex_page_size=None):
+    def list_nodes(self, ex_datacenter=None, ex_page_size=None):
         """
         Lists available nodes (excluding templates).
+
+        :param ex_datacenter: Filters the node list to nodes that are
+            located in this datacenter. (optional)
+        :type ex_datacenter: str
 
         :rtype: list[Node]
         """
         return list(self.iterate_nodes(
+            ex_datacenter=ex_datacenter,
             ex_page_size=ex_page_size,
         ))
 
-    def iterate_nodes(self, ex_page_size=None):
+    def iterate_nodes(self, ex_datacenter=None, ex_page_size=None):
         """
         Iterate available nodes (excluding templates).
 
         :rtype: collections.Iterable[Node]
         """
+        datacenters = self.ex_list_datacenters()
+        if ex_datacenter is not None:
+            ex_datacenter = self._get_datacenter_by_name(
+                name=ex_datacenter,
+                datacenters=datacenters)
+
+        # pylint: disable=protected-access
+        datacenter_stores = {
+            datastore._moId: datacenter.name
+            for datacenter in datacenters
+            for datastore in datacenter.datastore}
         creation_times = self._query_node_creation_times()
 
         def result_to_nodes(result):
@@ -508,7 +530,10 @@ class VSphereNodeDriver(NodeDriver):
             for vm_entity, vm_properties in result.items():
                 if vm_properties['summary.config'].template is True:
                     continue
-                node = self._to_node(vm_entity, vm_properties)
+                node = self._to_node(
+                    vm_entity,
+                    vm_properties=vm_properties,
+                    datacenter_stores=datacenter_stores)
                 node.created_at = creation_times.get(node.id)
                 nodes.append(node)
             return nodes
@@ -516,6 +541,7 @@ class VSphereNodeDriver(NodeDriver):
         return VSpherePropertyCollector(
             self, vim.VirtualMachine,
             path_set=[
+                'datastore',
                 'summary',
                 'summary.config',
                 'summary.runtime',
@@ -523,6 +549,7 @@ class VSphereNodeDriver(NodeDriver):
             ],
             process_fn=result_to_nodes,
             page_size=ex_page_size,
+            container=ex_datacenter,
         )
 
     def list_images(self, ex_page_size=None):
@@ -668,6 +695,16 @@ class VSphereNodeDriver(NodeDriver):
             child_tree = item.childSnapshotList
             snapshot_data.extend(self._walk_snapshot_tree(child_tree))
         return snapshot_data
+
+    def _get_datacenter_by_name(self, name, datacenters=None):
+        datacenter_names = {
+            datacenter.name: datacenter
+            for datacenter in datacenters or self.ex_list_datacenters()}
+        if name not in datacenter_names:
+            raise ValueError((
+                "Unknown datacenter name, available: {}"
+            ).format(', '.join(datacenter_names.keys())))
+        return datacenter_names[name]
 
     def _query_node_creation_times(self, virtual_machine=None):
         """
@@ -958,16 +995,29 @@ class VSphereNodeDriver(NodeDriver):
         """
         return self._to_node(vm_entity=self.ex_get_vm(uuid))
 
-    def _to_node(self, vm_entity, vm_properties=None):
+    def _to_node(self, vm_entity, vm_properties=None, datacenter_stores=None):
         """
         Creates :class:`Node` object from :class:`vim.VirtualMachine`.
+
+        :param vm_properties: VM properties.
+        :type vm_properties: dict
+
+        :param datacenter_stores: The datastore ID to datacenter name map.
+        :type datacenter_stores: dict
         """
         if vm_properties is None:
             vm_properties = {}
+        datastores = vm_properties.get('datastore') or vm_entity.datastore
         summary = vm_properties.get('summary') or vm_entity.summary
-        config = vm_properties.get('summary.config') or vm_entity.config
-        runtime = vm_properties.get('summary.runtime') or vm_entity.runtime
-        guest = vm_properties.get('summary.guest') or vm_entity.guest
+        config = vm_properties.get('summary.config') or summary.config
+        runtime = vm_properties.get('summary.runtime') or summary.runtime
+        guest = vm_properties.get('summary.guest') or summary.guest
+
+        if datastores and datacenter_stores is not None:
+            # pylint: disable=protected-access
+            datacenter = datacenter_stores.get(datastores[0]._moId)
+        else:
+            datacenter = None
 
         extra = {
             'uuid': config.uuid,
@@ -981,6 +1031,7 @@ class VSphereNodeDriver(NodeDriver):
             'memory_mb': config.memorySizeMB,
             'boot_time': None,
             'annotation': None,
+            'datacenter': datacenter
         }
 
         boot_time = runtime.bootTime
