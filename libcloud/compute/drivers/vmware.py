@@ -331,7 +331,8 @@ class _FileInfo(object):
 
     @property
     def size_in_gb(self):
-        return self.size / (1024.0 ** 2)
+        if self.size is not None:
+            return round(self.size / (1024.0 ** 2), 1)
 
     def __repr__(self):
         return (
@@ -1123,7 +1124,7 @@ class VSphereNodeDriver(NodeDriver):
         return StorageVolume(
             id=file_info.path,
             name=os.path.basename(file_info.path),
-            size=round(file_info.size_in_gb, 1),
+            size=file_info.size_in_gb,
             driver=self,
             extra=extra)
 
