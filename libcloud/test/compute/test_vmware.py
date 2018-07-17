@@ -54,6 +54,7 @@ class PyVmomiTypes:
     VirtualDisk = type('VirtualDisk', (mock.MagicMock,), {})
     VirtualSCSIController = type('VirtualSCSIController', (mock.MagicMock,), {})
     FileQuery = type('FileQuery', (mock.MagicMock,), {})
+    DatastoreUrlPair = type('DatastoreUrlPair', (mock.MagicMock,), {})
 
 
 class PropertyCollectorMock(object):
@@ -233,6 +234,9 @@ class VSphereConnectionTests(test.LibcloudTestCase):
 @mock.patch(
     'pyVmomi.vim.vm.device.VirtualDisk',
     PyVmomiTypes.VirtualDisk)
+@mock.patch(
+    'pyVmomi.vim.vm.ConfigInfo.DatastoreUrlPair',
+    PyVmomiTypes.DatastoreUrlPair)
 @mock.patch('pyVmomi.vim.FileQuery', PyVmomiTypes.FileQuery)
 @mock.patch('pyVmomi.vim.VmDiskFileQuery', PyVmomiTypes.FileQuery)
 @mock.patch.object(vmware, 'VSpherePropertyCollector', PropertyCollectorMock)
@@ -621,6 +625,7 @@ class VSphereNodeDriverTests(test.LibcloudTestCase):
         self.assertEqual(images[0].id, 'vm-uuid')
         self.assertEqual(images[0].extra, {
             'managed_object_id': 'vm-1111',
+            'datacenter': None,
         })
         self.assertEqual(images[0].created_at, 'time-1')
 
