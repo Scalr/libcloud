@@ -23,6 +23,7 @@ import os
 import re
 import ssl
 import time
+import functools
 from datetime import datetime
 from datetime import timedelta
 
@@ -202,7 +203,7 @@ class VCenterFileSearch(misc_utils.PageList):
     one datastore represents the one page of results.
     """
 
-    def __init__(self, driver, file_query, process_fn=None):
+    def __init__(self, driver, file_query, datacenter=None, process_fn=None):
         """
         :param driver: The VSphere driver.
         :type driver: :class:`VSphereNodeDriver`
@@ -225,6 +226,7 @@ class VCenterFileSearch(misc_utils.PageList):
 
         self._driver = driver  # type: VSphereNodeDriver
         self._file_query = file_query  # type: vim.FileQuery
+        self._datacenter = datacenter
         self._search_tasks = None  # type: Iterator
         self._datastores_info = None  # type: list[vim.host.VmfsDatastoreInfo]
 
@@ -247,7 +249,10 @@ class VCenterFileSearch(misc_utils.PageList):
         :rtype: list[:class:`_FileInfo`]
         """
         if self._search_tasks is None:
-            datastores = self._driver.ex_list_datastores()
+            if self._datacenter is not None:
+                datastores = self._datacenter.datastore
+            else:
+                datastores = self._driver.ex_list_datastores()
             datastores_info = [datastore.info for datastore in datastores]
             filter_query_flags = vim.FileQueryFlags(
                 fileSize=True,
@@ -513,17 +518,8 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: collections.Iterable[Node]
         """
-        datacenters = self.ex_list_datacenters()
         if ex_datacenter is not None:
-            ex_datacenter = self._get_datacenter_by_id(
-                datacenter_id=ex_datacenter,
-                datacenters=datacenters)
-
-        # pylint: disable=protected-access
-        datacenter_stores = {
-            datastore._moId: datacenter._moId
-            for datacenter in datacenters
-            for datastore in datacenter.datastore}
+            ex_datacenter = self._get_datacenter_by_id(ex_datacenter)
         creation_times = self._query_node_creation_times()
 
         def result_to_nodes(result):
@@ -531,18 +527,16 @@ class VSphereNodeDriver(NodeDriver):
             for vm_entity, vm_properties in result.items():
                 if vm_properties['summary.config'].template is True:
                     continue
-                node = self._to_node(
-                    vm_entity,
-                    vm_properties=vm_properties,
-                    datacenter_stores=datacenter_stores)
+                node = self._to_node(vm_entity, vm_properties)
                 node.created_at = creation_times.get(node.id)
                 nodes.append(node)
             return nodes
 
+        self._get_datacenter_urls_map.cache_clear()
         return VSpherePropertyCollector(
             self, vim.VirtualMachine,
             path_set=[
-                'datastore',
+                'config.datastoreUrl',
                 'summary',
                 'summary.config',
                 'summary.runtime',
@@ -553,22 +547,29 @@ class VSphereNodeDriver(NodeDriver):
             container=ex_datacenter,
         )
 
-    def list_images(self, ex_page_size=None):
+    def list_images(self, ex_datacenter=None, ex_page_size=None):
         """
         List available images (templates).
+
+        :param ex_datacenter: Filters the node list to nodes that are
+            located in this datacenter. (optional)
+        :type ex_datacenter: str
 
         :rtype: list[Image]
         """
         return list(self.iterate_images(
+            ex_datacenter=ex_datacenter,
             ex_page_size=ex_page_size,
         ))
 
-    def iterate_images(self, ex_page_size=None):
+    def iterate_images(self, ex_datacenter=None, ex_page_size=None):
         """
         Iterate available images (templates).
 
         :rtype: collections.Iterable[Image]
         """
+        if ex_datacenter is not None:
+            ex_datacenter = self._get_datacenter_by_id(ex_datacenter)
         creation_times = self._query_node_creation_times()
 
         def result_to_images(result):
@@ -582,24 +583,34 @@ class VSphereNodeDriver(NodeDriver):
                 images.append(image)
             return images
 
+        self._get_datacenter_urls_map.cache_clear()
         return VSpherePropertyCollector(
             self, vim.VirtualMachine,
             path_set=[
+                'config.datastoreUrl',
                 'summary.config',
             ],
             process_fn=result_to_images,
             page_size=ex_page_size,
+            container=ex_datacenter,
         )
 
-    def list_volumes(self, node=None):
+    def list_volumes(self, node=None, ex_datacenter=None):
         """
         List available volumes (on all datastores).
 
+        :param ex_datacenter: Filters the volume list to volume that are
+            located in this datacenter. (optional)
+        :type ex_datacenter: str
+
         :rtype: list[StorageVolume]
         """
-        return list(self.iterate_volumes(node=node))
+        return list(self.iterate_volumes(
+            node=node,
+            ex_datacenter=ex_datacenter,
+        ))
 
-    def iterate_volumes(self, node=None):
+    def iterate_volumes(self, node=None, ex_datacenter=None):
         """
         Iterate available volumes (on all datastores).
 
@@ -618,6 +629,9 @@ class VSphereNodeDriver(NodeDriver):
             virtual_machine=virtual_machine)
         volume_creation_times = self._query_volume_creation_times(
             virtual_machine=virtual_machine)
+
+        if ex_datacenter is not None:
+            ex_datacenter = self._get_datacenter_by_id(ex_datacenter)
 
         def files_to_volumes(vmdk_files):
             """
@@ -639,31 +653,40 @@ class VSphereNodeDriver(NodeDriver):
                 volumes.append(volume)
             return volumes
 
+        self._get_datacenter_urls_map.cache_clear()
         if virtual_machine:
             # iterate over disks on the one virtual machine
             vmdk_files = {disk[0].file_info for disk in virtual_disks.values()}
             return iter(files_to_volumes(vmdk_files))
-
         return iter(VCenterFileSearch(
             self, vim.VmDiskFileQuery(),
-            process_fn=files_to_volumes))
+            process_fn=files_to_volumes,
+            datacenter=ex_datacenter))
 
-    def list_snapshots(self, ex_page_size=None):
+    def list_snapshots(self, ex_datacenter=None, ex_page_size=None):
         """
         List available snapshots.
+
+        :param ex_datacenter: Filters the snapshots list to snapshots that are
+            located in this datacenter. (optional)
+        :type ex_datacenter: str
 
         :rtype: list[VolumeSnapshot]
         """
         return list(self.iterate_snapshots(
+            ex_datacenter=ex_datacenter,
             ex_page_size=ex_page_size,
         ))
 
-    def iterate_snapshots(self, ex_page_size=None):
+    def iterate_snapshots(self, ex_datacenter=None, ex_page_size=None):
         """
         Iterate available snapshots.
 
         :rtype: collections.Iterable[VolumeSnapshot]
         """
+        if ex_datacenter is not None:
+            ex_datacenter = self._get_datacenter_by_id(ex_datacenter)
+
         def result_to_snapshots(result):
             snapshots = []
             for vm_properties in result.values():
@@ -673,15 +696,18 @@ class VSphereNodeDriver(NodeDriver):
                     for snap_tree in self._walk_snapshot_tree(snapshot_trees)])
             return snapshots
 
+        self._get_datacenter_urls_map.cache_clear()
         return VSpherePropertyCollector(
             self, vim.VirtualMachine,
             path_set=[
+                'config.datastoreUrl',
                 'snapshot.rootSnapshotList',
                 'layoutEx.snapshot',
                 'layoutEx.file',
             ],
             process_fn=result_to_snapshots,
             page_size=ex_page_size,
+            container=ex_datacenter,
         )
 
     def _walk_snapshot_tree(self, snapshot_tree):
@@ -697,15 +723,53 @@ class VSphereNodeDriver(NodeDriver):
             snapshot_data.extend(self._walk_snapshot_tree(child_tree))
         return snapshot_data
 
-    def _get_datacenter_by_id(self, datacenter_id, datacenters=None):
+    def _get_datacenter_by_id(self, datacenter_id):
+        """
+        Returns the VMWare datacenter for a given ID.
+
+        :param datacenter_id: The ID of the datacenter.
+        :type datacenter_id: str
+
+        :rtype: :class:`vim.Datacenter`
+        """
         datacenter_ids = {
             datacenter._moId: datacenter
-            for datacenter in datacenters or self.ex_list_datacenters()}
+            for datacenter in self.ex_list_datacenters()}
         if datacenter_id not in datacenter_ids:
             raise ValueError((
                 "Unknown datacenter ID, available: {}"
             ).format(', '.join(datacenter_ids.keys())))
         return datacenter_ids[datacenter_id]
+
+    @functools.lru_cache()
+    def _get_datacenter_urls_map(self):
+        return {
+            datastore.info.url: datacenter._moId
+            for datacenter in self.ex_list_datacenters()
+            for datastore in datacenter.datastore}
+
+    def _get_datacenter_id_by_url(self, url):
+        """
+        Returns the datacenter ID for a given datastore URL.
+
+        :type url: str | :class:`vim.vm.ConfigInfo.DatastoreUrlPair` | list
+        :rtype: str | None
+        """
+        if url and isinstance(url, list):
+            url = url[0]
+        if isinstance(url, vim.vm.ConfigInfo.DatastoreUrlPair):
+            url = str(url.url)
+        if not url:
+            return
+
+        try:
+            url = url.split('/')
+            volume_id = url[url.index('volumes') + 1]
+        except (ValueError, IndexError):
+            raise LibcloudError("Unexpected URL format: {}".format(url))
+
+        datacenter_urls = self._get_datacenter_urls_map()
+        return datacenter_urls.get('ds:///vmfs/volumes/{}/'.format(volume_id))
 
     def _query_node_creation_times(self, virtual_machine=None):
         """
@@ -829,7 +893,7 @@ class VSphereNodeDriver(NodeDriver):
         """
         match = re.match(r'^\[(.*?)\] ((\w|\W)*)$', name)
         if not match:
-            raise LibcloudError("Unecpected file name format: {}".format(name))
+            raise LibcloudError("Unexpected file name format: {}".format(name))
         datastore_name, file_path = match.group(1, 2)
 
         for datastore_info in datastores_info:
@@ -996,29 +1060,21 @@ class VSphereNodeDriver(NodeDriver):
         """
         return self._to_node(vm_entity=self.ex_get_vm(uuid))
 
-    def _to_node(self, vm_entity, vm_properties=None, datacenter_stores=None):
+    def _to_node(self, vm_entity, vm_properties=None):
         """
         Creates :class:`Node` object from :class:`vim.VirtualMachine`.
 
         :param vm_properties: VM properties.
         :type vm_properties: dict
-
-        :param datacenter_stores: The datastore ID to datacenter ID map.
-        :type datacenter_stores: dict
         """
         if vm_properties is None:
             vm_properties = {}
-        datastores = vm_properties.get('datastore') or vm_entity.datastore
+        datastore_url = vm_properties.get('config.datastoreUrl') \
+            or vm_entity.config.datastoreUrl
         summary = vm_properties.get('summary') or vm_entity.summary
         config = vm_properties.get('summary.config') or summary.config
         runtime = vm_properties.get('summary.runtime') or summary.runtime
         guest = vm_properties.get('summary.guest') or summary.guest
-
-        if datastores and datacenter_stores is not None:
-            # pylint: disable=protected-access
-            datacenter = datacenter_stores.get(datastores[0]._moId)
-        else:
-            datacenter = None
 
         extra = {
             'uuid': config.uuid,
@@ -1032,7 +1088,7 @@ class VSphereNodeDriver(NodeDriver):
             'memory_mb': config.memorySizeMB,
             'boot_time': None,
             'annotation': None,
-            'datacenter': datacenter
+            'datacenter': self._get_datacenter_id_by_url(datastore_url),
         }
 
         boot_time = runtime.bootTime
@@ -1067,12 +1123,14 @@ class VSphereNodeDriver(NodeDriver):
             extra=extra)
         return node
 
-    def _to_image(self, vm_entity, vm_properties=None):
+    def _to_image(self, vm_entity, vm_properties=None, datacenter_stores=None):
         """
         Creates :class:`NodeImage` object from :class:`vim.VirtualMachine`.
         """
         if vm_properties is None:
             vm_properties = {}
+        datastore_url = vm_properties.get('config.datastoreUrl') \
+            or vm_entity.config.datastoreUrl
         config = vm_properties.get('summary.config') or vm_entity.summary.config
 
         return NodeImage(
@@ -1081,6 +1139,7 @@ class VSphereNodeDriver(NodeDriver):
             extra={
                 # pylint: disable=protected-access
                 'managed_object_id': vm_entity._GetMoId(),
+                'datacenter': self._get_datacenter_id_by_url(datastore_url),
             },
             driver=self)
 
@@ -1117,6 +1176,7 @@ class VSphereNodeDriver(NodeDriver):
             'last_modified': file_info.modification,
             'created_at': None,
             'devices': collections.defaultdict(list),
+            'datacenter': self._get_datacenter_id_by_url(file_info.path)
         }
         for device in devices:
             extra['devices'][device.owner_id].append(device.__dict__)
@@ -1147,6 +1207,8 @@ class VSphereNodeDriver(NodeDriver):
             vm_properties = {}
 
         vm_entity = snapshot_tree.vm
+        datastore_url = vm_properties.get('config.datastoreUrl') \
+            or vm_entity.config.datastoreUrl
         snapshot_layout = vm_properties.get('layoutEx.snapshot')
         file_layout = vm_properties.get('layoutEx.file')
         if snapshot_layout is None or file_layout is None:
@@ -1162,6 +1224,7 @@ class VSphereNodeDriver(NodeDriver):
             'backup_manifest': snapshot_tree.backupManifest,
             'replay_supported': snapshot_tree.replaySupported,
             'owner_state': snapshot_tree.state,
+            'datacenter': self._get_datacenter_id_by_url(datastore_url),
             # pylint: disable=protected-access
             'owner_id': snapshot_tree.vm._GetMoId()
         }
