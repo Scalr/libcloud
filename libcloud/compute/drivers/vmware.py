@@ -752,6 +752,10 @@ class VSphereNodeDriver(NodeDriver):
         """
         Returns the datacenter ID for a given datastore URL.
 
+        Example URLs:
+         - `/vmfs/volumes/599d9c57-a93b0b7a-ea4c-984be16496c6`
+         - `ds:///vmfs/volumes/599d9c57-a93b0b7a-ea4c-984be16496c6/volume.vmdk`
+
         :type url: str | :class:`vim.vm.ConfigInfo.DatastoreUrlPair` | list
         :rtype: str | None
         """
@@ -1123,7 +1127,7 @@ class VSphereNodeDriver(NodeDriver):
             extra=extra)
         return node
 
-    def _to_image(self, vm_entity, vm_properties=None, datacenter_stores=None):
+    def _to_image(self, vm_entity, vm_properties=None):
         """
         Creates :class:`NodeImage` object from :class:`vim.VirtualMachine`.
         """
