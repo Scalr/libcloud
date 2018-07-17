@@ -521,7 +521,7 @@ class VSphereNodeDriver(NodeDriver):
 
         # pylint: disable=protected-access
         datacenter_stores = {
-            datastore._moId: datacenter.name
+            datastore._moId: datacenter._moId
             for datacenter in datacenters
             for datastore in datacenter.datastore}
         creation_times = self._query_node_creation_times()
@@ -1003,7 +1003,7 @@ class VSphereNodeDriver(NodeDriver):
         :param vm_properties: VM properties.
         :type vm_properties: dict
 
-        :param datacenter_stores: The datastore ID to datacenter name map.
+        :param datacenter_stores: The datastore ID to datacenter ID map.
         :type datacenter_stores: dict
         """
         if vm_properties is None:
