@@ -515,8 +515,8 @@ class VSphereNodeDriver(NodeDriver):
         """
         datacenters = self.ex_list_datacenters()
         if ex_datacenter is not None:
-            ex_datacenter = self._get_datacenter_by_name(
-                name=ex_datacenter,
+            ex_datacenter = self._get_datacenter_by_id(
+                datacenter_id=ex_datacenter,
                 datacenters=datacenters)
 
         # pylint: disable=protected-access
@@ -697,15 +697,15 @@ class VSphereNodeDriver(NodeDriver):
             snapshot_data.extend(self._walk_snapshot_tree(child_tree))
         return snapshot_data
 
-    def _get_datacenter_by_name(self, name, datacenters=None):
-        datacenter_names = {
-            datacenter.name: datacenter
+    def _get_datacenter_by_id(self, datacenter_id, datacenters=None):
+        datacenter_ids = {
+            datacenter._moId: datacenter
             for datacenter in datacenters or self.ex_list_datacenters()}
-        if name not in datacenter_names:
+        if datacenter_id not in datacenter_ids:
             raise ValueError((
-                "Unknown datacenter name, available: {}"
-            ).format(', '.join(datacenter_names.keys())))
-        return datacenter_names[name]
+                "Unknown datacenter ID, available: {}"
+            ).format(', '.join(datacenter_ids.keys())))
+        return datacenter_ids[datacenter_id]
 
     def _query_node_creation_times(self, virtual_machine=None):
         """
