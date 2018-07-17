@@ -331,18 +331,18 @@ class VSphereNodeDriverTests(test.LibcloudTestCase):
                 file=[
                     create_mock(
                         path='centos7.vmdk',
-                        fileSize=700*1024
+                        fileSize=700 * (1024 ** 3)
                     ),
                     create_mock(
                         path='ubuntu1404.vmdk',
-                        fileSize=800*1024
+                        fileSize=800 * (1024 ** 3)
                     )],),
             create_mock(
                 folderPath='[dc1] dir-2/',
                 file=[
                     create_mock(
                         path='debian8.vmdk',
-                        fileSize=400*1024,
+                        fileSize=400 * (1024 ** 3),
                     )
                 ]
             )]
@@ -352,7 +352,7 @@ class VSphereNodeDriverTests(test.LibcloudTestCase):
                 file=[
                     create_mock(
                         path='debian9.vmdk',
-                        fileSize=410*1024,
+                        fileSize=410 * (1024 ** 3),
                     )
                 ]
             )]
@@ -482,12 +482,12 @@ class VSphereNodeDriverTests(test.LibcloudTestCase):
                 create_mock(dataKey=3, key=3),
             ],
             file=[
-                create_mock(size=10 * 1024, key=1, type='snapshotData'),
-                create_mock(size=11 * 1024, key=1, type='unknownData'),
-                create_mock(size=12 * 1024, key=2, type='snapshotData'),
-                create_mock(size=13 * 1024, key=2, type='unknownData'),
-                create_mock(size=14 * 1024, key=3, type='snapshotData'),
-                create_mock(size=15 * 1024, key=3, type='snapshotData'),
+                create_mock(size=10 * (1024 ** 3), key=1, type='snapshotData'),
+                create_mock(size=11 * (1024 ** 3), key=1, type='unknownData'),
+                create_mock(size=12 * (1024 ** 3), key=2, type='snapshotData'),
+                create_mock(size=13 * (1024 ** 3), key=2, type='unknownData'),
+                create_mock(size=14 * (1024 ** 3), key=3, type='snapshotData'),
+                create_mock(size=15 * (1024 ** 3), key=3, type='snapshotData'),
             ]
         )
 
@@ -598,6 +598,7 @@ class VSphereNodeDriverTests(test.LibcloudTestCase):
             'memory_mb': 1200,
             'boot_time': boot_time.isoformat(),
             'annotation': 'annotation-text',
+            'datacenter': None,
         })
         self.assertEqual(nodes[0].created_at, create_time)
 
