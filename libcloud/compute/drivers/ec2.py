@@ -4554,7 +4554,12 @@ class BaseEC2NodeDriver(NodeDriver):
             params['DryRun'] = True
 
         response = self.connection.request(self.path, params=params).object
-        return response
+
+        return {
+            'request_id': findtext(element=response, xpath='requestId', namespace=NAMESPACE),
+            'reserved_instance_id': findtext(element=response, xpath='reservedInstancesId',
+                                             namespace=NAMESPACE)
+        }
 
     def ex_create_placement_group(self, name):
         """
