@@ -167,7 +167,7 @@ class Provider(Type):
     VCLOUD = 'vcloud'
     VOXEL = 'voxel'
     VPSNET = 'vpsnet'
-    VSPHERE = 'vsphere'
+    VSPHERE = 'vmware'
     VULTR = 'vultr'
 
     # OpenStack based providers

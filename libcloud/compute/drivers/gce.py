@@ -21,6 +21,7 @@ import datetime
 import time
 import sys
 
+from libcloud.utils import misc as misc_utils
 from libcloud.common.base import LazyObject
 from libcloud.common.google import GoogleOAuth2Credential
 from libcloud.common.google import GoogleResponse
@@ -39,6 +40,7 @@ from libcloud.utils.iso8601 import parse_date
 
 API_VERSION = 'v1'
 DEFAULT_TASK_COMPLETION_TIMEOUT = 180
+DEFAULT_PAGE_SIZE = 500
 
 
 def timestamp_to_datetime(timestamp):
@@ -206,49 +208,52 @@ class GCEConnection(GoogleBaseConnection):
         return {'items': merged_items}
 
 
-class GCEList(object):
+class GCEPageList(misc_utils.PageList):
     """
     An Iterator that wraps list functions to provide additional features.
 
     GCE enforces a limit on the number of objects returned by a list operation,
     so users with more than 500 objects of a particular type will need to use
-    filter(), page() or both.
+    filter(), iterate over this list with next page requests done automatically
+    or use page() explicitly.
 
-    >>> l=GCEList(driver, driver.ex_list_urlmaps)
-    >>> for sublist in l.filter('name eq ...-map').page(1):
-    ...   sublist
+    >>> l=GCEPageList(driver, driver.ex_list_urlmaps)
+    >>> for url_map in l.filter('name eq ...-map'):
+    ...    url_map
     ...
-    [<GCEUrlMap id="..." name="cli-map">]
-    [<GCEUrlMap id="..." name="web-map">]
-
-    One can create a GCEList manually, but it's slightly easier to use the
-    ex_list() method of :class:`GCENodeDriver`.
+    <GCEUrlMap id="..." name="cli-map">
+    <GCEUrlMap id="..." name="web-map">
     """
+    page_token_name = 'pageToken'
+    page_size_name = 'maxResults'
 
-    def __init__(self, driver, list_fn, **kwargs):
+    def __init__(self, driver, *args, **kwargs):
         """
         :param  driver: An initialized :class:``GCENodeDriver``
         :type   driver: :class:``GCENodeDriver``
 
-        :param  list_fn: A bound list method from :class:`GCENodeDriver`.
-        :type   list_fn: ``instancemethod``
+        :param  params: request params.
+        :type   params: ``dict``
         """
+        super(GCEPageList, self).__init__(*args, **kwargs)
         self.driver = driver
-        self.list_fn = list_fn
-        self.kwargs = kwargs
-        self.params = {}
+        self.params = kwargs.get('params', {})
 
-    def __iter__(self):
-        list_fn = self.list_fn
-        more_results = True
-        while more_results:
-            self.driver.connection.gce_params = self.params
-            yield list_fn(**self.kwargs)
-            more_results = 'pageToken' in self.params
+    def page(self):
+        self.driver.connection.gce_params = self.params
+        return super(GCEPageList, self).page()
 
-    def __repr__(self):
-        return '<GCEList list="%s" params="%s">' % (self.list_fn.__name__,
-                                                    repr(self.params))
+    def update_request_kwds(self):
+        if self.next_page_token:
+            self.params[self.page_token_name] = self.next_page_token
+        if self.page_size:
+            self.params[self.page_size_name] = self.page_size
+
+    def extract_next_page_token(self, response):
+        if response:
+            # If there was a response, params dict will be updated with the new
+            # pageToken
+            return self.params.get('pageToken')
 
     def filter(self, expression):
         """
@@ -275,34 +280,10 @@ class GCEList(object):
         :param  expression: Filter expression described above.
         :type   expression: ``str``
 
-        :return: This :class:`GCEList` instance
-        :rtype:  :class:`GCEList`
+        :return: This :class:`GCEPageList` instance
+        :rtype:  :class:`GCEPageList`
         """
         self.params['filter'] = expression
-        return self
-
-    def page(self, max_results=500):
-        """
-        Limit the number of results by each iteration.
-
-        This implements the paging functionality of the GCE list methods and
-        returns this GCEList instance so that results can be chained:
-
-        >>> for sublist in GCEList(driver, driver.ex_list_urlmaps).page(2):
-        ...   sublist
-        ...
-        [<GCEUrlMap id="..." name="cli-map">, \
-                <GCEUrlMap id="..." name="lc-map">]
-        [<GCEUrlMap id="..." name="web-map">]
-
-        :keyword  max_results: Maximum number of results to return per
-                               iteration. Defaults to the GCE default of 500.
-        :type     max_results: ``int``
-
-        :return: This :class:`GCEList` instance
-        :rtype:  :class:`GCEList`
-        """
-        self.params['maxResults'] = max_results
         return self
 
 
@@ -1981,25 +1962,6 @@ class GCENodeDriver(NodeDriver):
         response = self.connection.request(request, method='GET').object
         return response['contents']
 
-    def ex_list(self, list_fn, **kwargs):
-        """
-        Wrap a list method in a :class:`GCEList` iterator.
-
-        >>> for sublist in driver.ex_list(driver.ex_list_urlmaps).page(1):
-        ...   sublist
-        ...
-        [<GCEUrlMap id="..." name="cli-map">]
-        [<GCEUrlMap id="..." name="lc-map">]
-        [<GCEUrlMap id="..." name="web-map">]
-
-        :param  list_fn: A bound list method from :class:`GCENodeDriver`.
-        :type   list_fn: ``instancemethod``
-
-        :return: An iterator that returns sublists from list_fn.
-        :rtype: :class:`GCEList`
-        """
-        return GCEList(driver=self, list_fn=list_fn, **kwargs)
-
     def ex_list_disktypes(self, zone=None):
         """
         Return a list of DiskTypes for a zone or all.
@@ -2239,40 +2201,17 @@ class GCENodeDriver(NodeDriver):
                                          for f in response['items']]
         return list_forwarding_rules
 
-    def list_images(self, ex_project=None, ex_include_deprecated=False):
+    def list_images(self, *args, **kwargs):
         """
-        Return a list of image objects. If no project is specified, a list of
-        all non-deprecated global and vendor images images is returned. By
-        default, only non-deprecated images are returned.
-
-        :keyword  ex_project: Optional alternate project name.
-        :type     ex_project: ``str``, ``list`` of ``str``, or ``None``
-
-        :keyword  ex_include_deprecated: If True, even DEPRECATED images will
-                                         be returned.
-        :type     ex_include_deprecated: ``bool``
+        See ``iterate_images()``
 
         :return:  List of GCENodeImage objects
         :rtype:   ``list`` of :class:`GCENodeImage`
         """
-        dep = ex_include_deprecated
-        if ex_project is not None:
-            return self.ex_list_project_images(ex_project=ex_project,
-                                               ex_include_deprecated=dep)
-        image_list = self.ex_list_project_images(ex_project=None,
-                                                 ex_include_deprecated=dep)
-        for img_proj in list(self.IMAGE_PROJECTS.keys()):
-            try:
-                image_list.extend(
-                    self.ex_list_project_images(ex_project=img_proj,
-                                                ex_include_deprecated=dep))
-            except:
-                # do not break if an OS type is invalid
-                pass
-        return image_list
+        return list(self.iterate_images(*args, **kwargs))
 
-    def ex_list_project_images(self, ex_project=None,
-                               ex_include_deprecated=False):
+    def iterate_images(self, ex_project=None, ex_include_deprecated=False,
+            ex_page_size=DEFAULT_PAGE_SIZE):
         """
         Return a list of image objects for a project. If no project is
         specified, only a list of 'global' images is returned.
@@ -2284,45 +2223,69 @@ class GCENodeDriver(NodeDriver):
                                          be returned.
         :type     ex_include_deprecated: ``bool``
 
-        :return:  List of GCENodeImage objects
-        :rtype:   ``list`` of :class:`GCENodeImage`
+        :return:  Iterator on GCENodeImage objects
+        :rtype:   ``GCEPageList`` of :class:`GCENodeImage`
         """
-        list_images = []
         request = '/global/images'
+
+        def split_to_images(response):
+            image_list = []
+            for img in response.object.get('items', []):
+                if 'deprecated' not in img or ex_include_deprecated:
+                    image_list.append(self._to_node_image(img))
+            return image_list
+
+        def request_images(project):
+            saved_request_path = self.connection.request_path
+
+            # Override the connection request path
+            self.connection.request_path = saved_request_path.replace(
+                self.project,
+                project)
+            try:
+                return self.connection.request(request,
+                                               method='GET')
+            finally:
+                # Restore the connection request_path
+                self.connection.request_path = saved_request_path
+
+        image_paginator = None
+
+        if isinstance(ex_project, str):
+            image_paginator = GCEPageList(
+                self,
+                request_images,
+                (ex_project,),
+                {},
+                page_size=ex_page_size,
+                process_fn=split_to_images)
+
+            return image_paginator
+
         if ex_project is None:
-            response = self.connection.request(request, method='GET').object
-            for img in response.get('items', []):
-                if 'deprecated' not in img:
-                    list_images.append(self._to_node_image(img))
-                else:
-                    if ex_include_deprecated:
-                        list_images.append(self._to_node_image(img))
-        else:
-            list_images = []
-            # Save the connection request_path
-            save_request_path = self.connection.request_path
-            if isinstance(ex_project, str):
-                ex_project = [ex_project]
-            for proj in ex_project:
-                # Override the connection request path
-                new_request_path = save_request_path.replace(self.project,
-                                                             proj)
-                self.connection.request_path = new_request_path
-                try:
-                    response = self.connection.request(request,
-                                                       method='GET').object
-                except:
-                    raise
-                finally:
-                    # Restore the connection request_path
-                    self.connection.request_path = save_request_path
-                for img in response.get('items', []):
-                    if 'deprecated' not in img:
-                        list_images.append(self._to_node_image(img))
-                    else:
-                        if ex_include_deprecated:
-                            list_images.append(self._to_node_image(img))
-        return list_images
+            image_paginator = GCEPageList(
+                self,
+                self.connection.request,
+                (request,),
+                {'method': 'GET'},
+                page_size=ex_page_size,
+                process_fn=split_to_images)
+            ex_project = list(self.IMAGE_PROJECTS.keys())
+
+        multi_lists = [GCEPageList(
+            self,
+            request_images,
+            (proj,),
+            {},
+            page_size=ex_page_size,
+            process_fn=split_to_images) for proj in ex_project]
+
+        if image_paginator:
+            multi_lists.insert(0, image_paginator)
+
+        image_paginator = sum(multi_lists, misc_utils.EmptyPageList())
+
+        return image_paginator
 
     def list_locations(self):
         """
@@ -2424,7 +2387,16 @@ class GCENodeDriver(NodeDriver):
                          for n in response.get('items', [])]
         return list_networks
 
-    def list_nodes(self, ex_zone=None, ex_use_disk_cache=True):
+    def list_nodes(self, *args, **kwargs):
+        """
+        See ``iterate_nodes()``
+
+        :return:  List of Node objects
+        :rtype:   ``list`` of :class:`Node`
+        """
+        return list(self.iterate_nodes(*args, **kwargs))
+
+    def iterate_nodes(self, ex_zone=None, ex_use_disk_cache=True, ex_page_size=DEFAULT_PAGE_SIZE):
         """
         Return a list of nodes in the current zone or all zones.
 
@@ -2437,44 +2409,36 @@ class GCENodeDriver(NodeDriver):
                                    than making a distinct API call for it.
         :type     ex_use_disk_cache: ``bool``
 
-        :return:  List of Node objects
-        :rtype:   ``list`` of :class:`Node`
+        :return:  Iterator on Node objects
+        :rtype:   ``GCEPageList`` of :class:`Node`
         """
-        list_nodes = []
         zone = self._set_zone(ex_zone)
         if zone is None:
             request = '/aggregated/instances'
         else:
             request = '/zones/%s/instances' % (zone.name)
-        response = self.connection.request(request, method='GET').object
 
-        if 'items' in response:
-            # The aggregated response returns a dict for each zone
+        def split_to_nodes(response):
+            if 'items' not in response.object:
+                return []
+
+            node_list = []
+            # Create volume cache now for fast lookups of disk info.
+            self._ex_populate_volume_dict()
+
             if zone is None:
-                # Create volume cache now for fast lookups of disk info.
-                self._ex_populate_volume_dict()
-                for v in response['items'].values():
-                    for i in v.get('instances', []):
-                        try:
-                            list_nodes.append(
-                                self._to_node(i,
-                                              use_disk_cache=ex_use_disk_cache)
-                            )
-                        # If a GCE node has been deleted between
-                        #   - is was listed by `request('.../instances', 'GET')
-                        #   - it is converted by `self._to_node(i)`
-                        # `_to_node()` will raise a ResourceNotFoundError.
-                        #
-                        # Just ignore that node and return the list of the
-                        # other nodes.
-                        except ResourceNotFoundError:
-                            pass
+                instances = (
+                    i
+                    for zone_info in response.object['items'].values()
+                    for i in zone_info.get('instances', []))
             else:
-                for i in response['items']:
-                    try:
-                        list_nodes.append(
-                            self._to_node(i, use_disk_cache=ex_use_disk_cache)
-                        )
+                instances = response.object['items']
+
+            for i in instances:
+                try:
+                    node_list.append(
+                        self._to_node(i, use_disk_cache=ex_use_disk_cache))
+                except ResourceNotFoundError:
                     # If a GCE node has been deleted between
                     #   - is was listed by `request('.../instances', 'GET')
                     #   - it is converted by `self._to_node(i)`
@@ -2482,11 +2446,22 @@ class GCENodeDriver(NodeDriver):
                     #
                     # Just ignore that node and return the list of the
                     # other nodes.
-                    except ResourceNotFoundError:
-                        pass
-        # Clear the volume cache as lookups are complete.
-        self._ex_volume_dict = {}
-        return list_nodes
+                    pass
+
+            # Clear the volume cache as lookups are complete.
+            self._ex_volume_dict = {}
+
+            return node_list
+
+        node_paginator = GCEPageList(
+            self,
+            self.connection.request,
+            (request,),
+            {'method': 'GET'},
+            page_size=ex_page_size,
+            process_fn=split_to_nodes)
+
+        return node_paginator
 
     def ex_list_regions(self):
         """
@@ -2532,19 +2507,31 @@ class GCENodeDriver(NodeDriver):
                 list_sizes = [self._to_node_size(s) for s in response['items']]
         return list_sizes
 
-    def ex_list_snapshots(self):
+    def ex_list_snapshots(self, *args, **kwargs):
+        """
+        See ``iterate_snapshots()``
+
+        :return:  List of GCESnapshot objects
+        :rtype:   ``list`` of :class:`GCESnapshot`
+        """
+        return list(self.ex_iterate_snapshots(*args, **kwargs))
+
+    def ex_iterate_snapshots(self, ex_page_size=DEFAULT_PAGE_SIZE):
         """
         Return the list of disk snapshots in the project.
 
-        :return:  A list of snapshot objects
-        :rtype:   ``list`` of :class:`GCESnapshot`
+        :return:  Iterator on snapshot objects
+        :rtype:   ``GCEPageList`` of :class:`GCESnapshot`
         """
-        list_snapshots = []
-        request = '/global/snapshots'
-        response = self.connection.request(request, method='GET').object
-        list_snapshots = [self._to_snapshot(s)
-                          for s in response.get('items', [])]
-        return list_snapshots
+        snapshot_paginator = GCEPageList(
+            self,
+            self.connection.request,
+            ('/global/snapshots',),
+            {'method': 'GET'},
+            page_size=ex_page_size,
+            process_fn=lambda resp:
+                [self._to_snapshot(s) for s in resp.object.get('items', [])])
+        return snapshot_paginator
 
     def ex_list_targethttpproxies(self):
         """
@@ -2753,7 +2740,16 @@ class GCENodeDriver(NodeDriver):
                                     for a in response['items']]
         return list_autoscalers
 
-    def list_volumes(self, ex_zone=None):
+    def list_volumes(self, *args, **kwargs):
+        """
+        See ``iterate_volumes()``
+
+        :return: A list of volume objects.
+        :rtype: ``list`` of :class:`StorageVolume`
+        """
+        return list(self.iterate_volumes(*args, **kwargs))
+
+    def iterate_volumes(self, ex_zone=None, ex_page_size=DEFAULT_PAGE_SIZE):
         """
         Return a list of volumes for a zone or all.
 
@@ -2764,28 +2760,39 @@ class GCENodeDriver(NodeDriver):
         :type     ex_zone: ``str`` or :class:`GCEZone` or
                             :class:`NodeLocation` or ``None``
 
-        :return: A list of volume objects.
-        :rtype: ``list`` of :class:`StorageVolume`
+        :return: Iterator on volume objects.
+        :rtype: ``GCEPageList`` of :class:`StorageVolume`
         """
-        list_volumes = []
         zone = self._set_zone(ex_zone)
         if zone is None:
             request = '/aggregated/disks'
         else:
             request = '/zones/%s/disks' % (zone.name)
 
-        response = self.connection.request(request, method='GET').object
-        if 'items' in response:
-            # The aggregated response returns a dict for each zone
-            if zone is None:
-                for v in response['items'].values():
-                    zone_volumes = [self._to_storage_volume(d)
-                                    for d in v.get('disks', [])]
-                    list_volumes.extend(zone_volumes)
-            else:
-                list_volumes = [self._to_storage_volume(d)
-                                for d in response['items']]
-        return list_volumes
+        def split_to_volumes(response):
+            response = response.object
+            list_volumes = []
+            if 'items' in response:
+                # The aggregated response returns a dict for each zone
+                if zone is None:
+                    for v in response['items'].values():
+                        zone_volumes = [self._to_storage_volume(d)
+                                        for d in v.get('disks', [])]
+                        list_volumes.extend(zone_volumes)
+                else:
+                    list_volumes = [self._to_storage_volume(d)
+                                    for d in response['items']]
+            return list_volumes
+
+        volume_paginator = GCEPageList(
+            self,
+            self.connection.request,
+            (request,),
+            {'method': 'GET'},
+            page_size=ex_page_size,
+            process_fn=split_to_volumes)
+
+        return volume_paginator
 
     def ex_list_zones(self):
         """
@@ -7685,18 +7692,18 @@ class GCENodeDriver(NodeDriver):
                   if no matching image is found.
         :rtype:   :class:`GCENodeImage` or ``None``
         """
-        project_images_list = self.ex_list(
-            self.list_images, ex_project=project, ex_include_deprecated=True)
+        project_images_list = self.iterate_images(
+            ex_project=project,
+            ex_include_deprecated=True)
         partial_match = []
-        for page in project_images_list.page():
-            for image in page:
-                if image.name == partial_name:
-                    return image
-                if image.name.startswith(partial_name):
-                    ts = timestamp_to_datetime(
-                        image.extra['creationTimestamp'])
-                    if not partial_match or partial_match[0] < ts:
-                        partial_match = [ts, image]
+        for image in project_images_list:
+            if image.name == partial_name:
+                return image
+            if image.name.startswith(partial_name):
+                ts = timestamp_to_datetime(
+                    image.extra['creationTimestamp'])
+                if not partial_match or partial_match[0] < ts:
+                    partial_match = [ts, image]
 
         if partial_match:
             return partial_match[1]

@@ -1,0 +1,211 @@
+{
+  "value": [
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-04-30T19:00:00+00:00",
+        "usageEndTime": "2018-04-30T20:00:00+00:00",
+        "meterName": "Standard S0 Database Days",
+        "meterCategory": "Data Services",
+        "meterSubCategory": "SQL Database",
+        "unit": "Days",
+        "instanceData": "{\"Microsoft.Resources\":{\"resourceUri\":\"/subscriptions/99999999/resourceGroups/groupNames/providers/Microsoft.Sql/servers/sqlserver04/databases/db04\",\"location\":\"eastus\"}}",
+        "meterId": "a149966f-73b4-4e1d-b335-d2a572b1e6bd",
+        "infoFields": {},
+        "quantity": 0.0416
+      }
+    },
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-04-30T19:00:00+00:00",
+        "usageEndTime": "2018-04-30T20:00:00+00:00",
+        "meterName": "Standard S0 Database Days",
+        "meterCategory": "Data Services",
+        "meterSubCategory": "SQL Database",
+        "unit": "Days",
+        "instanceData": "{\"Microsoft.Resources\":{\"resourceUri\":\"/subscriptions/99999999/resourceGroups/groupNames/providers/Microsoft.Sql/servers/sqlserver04/databases/db04\",\"location\":\"eastus\"}}",
+        "meterId": "a149966f-73b4-4e1d-b335-d2a572b1e6bd",
+        "infoFields": {},
+        "quantity": 0.0416
+      }
+    },
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-04-30T19:00:00+00:00",
+        "usageEndTime": "2018-04-30T20:00:00+00:00",
+        "meterName": "Premium Storage - Page Blob/P10 (Units)",
+        "meterRegion": "US East",
+        "meterCategory": "Storage",
+        "meterSubCategory": "Locally Redundant",
+        "unit": "Units",
+        "meterId": "05212985-faad-4b6c-8ddb-c08cc8e37f79",
+        "infoFields": {
+          "meteredRegion": "East US",
+          "meteredService": "Storage",
+          "meteredServiceType": "",
+          "project": "groupNames6225"
+        },
+        "quantity": 0.001344
+      }
+    },
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-04-30T20:00:00+00:00",
+        "usageEndTime": "2018-04-30T21:00:00+00:00",
+        "meterName": "Standard S0 Database Days",
+        "meterCategory": "Data Services",
+        "meterSubCategory": "SQL Database",
+        "unit": "Days",
+        "instanceData": "{\"Microsoft.Resources\":{\"resourceUri\":\"/subscriptions/99999999/resourceGroups/groupNames/providers/Microsoft.Sql/servers/sqlserver04/databases/db04\",\"location\":\"eastus\"}}",
+        "meterId": "a149966f-73b4-4e1d-b335-d2a572b1e6bd",
+        "infoFields": {},
+        "quantity": 0.0416
+      }
+    },
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-04-30T20:00:00+00:00",
+        "usageEndTime": "2018-04-30T21:00:00+00:00",
+        "meterName": "Standard S0 Database Days",
+        "meterCategory": "Data Services",
+        "meterSubCategory": "SQL Database",
+        "unit": "Days",
+        "instanceData": "{\"Microsoft.Resources\":{\"resourceUri\":\"/subscriptions/99999999/resourceGroups/groupNames/providers/Microsoft.Sql/servers/sqlserver04/databases/db04\",\"location\":\"eastus\"}}",
+        "meterId": "a149966f-73b4-4e1d-b335-d2a572b1e6bd",
+        "infoFields": {},
+        "quantity": 0.0416
+      }
+    },
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-04-30T23:00:00+00:00",
+        "usageEndTime": "2018-05-01T00:00:00+00:00",
+        "meterName": "Standard Managed Disk/S4 (Units)",
+        "meterRegion": "US East",
+        "meterCategory": "Storage",
+        "meterSubCategory": "Locally Redundant",
+        "unit": "Units",
+        "instanceData": "{\"Microsoft.Resources\":{\"resourceUri\":\"/subscriptions/99999999/resourceGroups/groupNames/providers/Microsoft.Compute/disks/volume-7e2375fb\",\"location\":\"useast\"}}",
+        "meterId": "ac5f153e-9a9e-480c-867d-95550d4ebdd4",
+        "infoFields": {},
+        "quantity": 0.001389
+      }
+    },
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-04-30T23:00:00+00:00",
+        "usageEndTime": "2018-05-01T00:00:00+00:00",
+        "meterName": "Standard Managed Disk/S4 (Units)",
+        "meterRegion": "US East",
+        "meterCategory": "Storage",
+        "meterSubCategory": "Locally Redundant",
+        "unit": "Units",
+        "instanceData": "{\"Microsoft.Resources\":{\"resourceUri\":\"/subscriptions/99999999/resourceGroups/dev/providers/Microsoft.Compute/disks/dev\",\"location\":\"useast\"}}",
+        "meterId": "ac5f153e-9a9e-480c-867d-95550d4ebdd4",
+        "infoFields": {},
+        "quantity": 0.001389
+      }
+    },
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-04-30T23:00:00+00:00",
+        "usageEndTime": "2018-05-01T00:00:00+00:00",
+        "meterName": "Standard Managed Disk/S4 (Units)",
+        "meterRegion": "US East",
+        "meterCategory": "Storage",
+        "meterSubCategory": "Locally Redundant",
+        "unit": "Units",
+        "instanceData": "{\"Microsoft.Resources\":{\"resourceUri\":\"/subscriptions/99999999/resourceGroups/groupNames/providers/Microsoft.Compute/disks/572ef55c-9f65-4411-bd3d-7ee80fbe02a9\",\"location\":\"useast\"}}",
+        "meterId": "ac5f153e-9a9e-480c-867d-95550d4ebdd4",
+        "infoFields": {},
+        "quantity": 0.001389
+      }
+    },
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-04-30T23:00:00+00:00",
+        "usageEndTime": "2018-05-01T00:00:00+00:00",
+        "meterName": "Standard Managed Disk/S4 (Units)",
+        "meterRegion": "US East",
+        "meterCategory": "Storage",
+        "meterSubCategory": "Locally Redundant",
+        "unit": "Units",
+        "instanceData": "{\"Microsoft.Resources\":{\"resourceUri\":\"/subscriptions/99999999/resourceGroups/groupNames/providers/Microsoft.Compute/disks/5e21acf4-8475-4fe3-b431-56a60f208aa2\",\"location\":\"useast\"}}",
+        "meterId": "ac5f153e-9a9e-480c-867d-95550d4ebdd4",
+        "infoFields": {},
+        "quantity": 0.001389
+      }
+    },
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-05-01T00:00:00+00:00",
+        "usageEndTime": "2018-05-01T01:00:00+00:00",
+        "meterName": "Standard IO - Page Blob/Disk (GB)",
+        "meterCategory": "Storage",
+        "meterSubCategory": "Locally Redundant",
+        "unit": "GB",
+        "instanceData": "{\"Microsoft.Resources\":{\"resourceUri\":\"/subscriptions/99999999/resourceGroups/dev/providers/Microsoft.Storage/storageAccounts/dev\",\"location\":\"uswest\"}}",
+        "meterId": "d23a5753-ff85-4ddf-af28-8cc5cf2d3882",
+        "infoFields": {},
+        "quantity": 0.0006
+      }
+    },
+    {
+      "id": "/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates/Hourly_BRSDT_20180501_0000",
+      "name": "Hourly_BRSDT_20180501_0000",
+      "type": "Microsoft.Commerce/UsageAggregate",
+      "properties": {
+        "subscriptionId": "99999999",
+        "usageStartTime": "2018-05-01T00:00:00+00:00",
+        "usageEndTime": "2018-05-01T01:00:00+00:00",
+        "meterName": "Standard IO - Table Batch Write Operation Units (in 10,000s)",
+        "meterCategory": "Data Management",
+        "unit": "10,000s",
+        "instanceData": "{\"Microsoft.Resources\":{\"resourceUri\":\"/subscriptions/99999999/resourceGroups/dev/providers/Microsoft.Storage/storageAccounts/dev\",\"location\":\"uswest\"}}",
+        "meterId": "b9e5e77c-a0b3-4a2c-9b8b-57fa54f31c52",
+        "infoFields": {},
+        "quantity": 0.0006
+      }
+    }
+  ],
+  "nextLink": "https://management.azure.com/subscriptions/99999999/providers/Microsoft.Commerce/UsageAggregates"
+}
