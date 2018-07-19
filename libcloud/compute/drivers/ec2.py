@@ -4519,6 +4519,43 @@ class BaseEC2NodeDriver(NodeDriver):
 
         return EC2ReservedInstancesOffering(**params)
 
+    def ex_purchase_reserved_instances_offering(self, offering_id, instance_count,
+                                                limit_price=None, dry_run=False):
+        """
+        Purchases a Reserved Instance for use with your account.
+
+        :param offering_id: The ID of the Reserved Instance offering to purchase.
+        :type  offering_id: str
+
+        :param instance_count: The number of Reserved Instances to purchase.
+        :type instance_count: int
+
+        :param limit_price: Specified for Reserved Instance Marketplace offerings to limit the
+            total order and ensure that the Reserved Instances are not purchased at unexpected
+            prices.
+        :type limit_price: float
+
+        :param dry_run: Checks whether you have the required permissions for the action,
+            without actually making the request, and provides an error response.
+            If you have the required permissions, the error response is DryRunOperation.
+            Otherwise, it is UnauthorizedOperation.
+        :type dry_run: bool
+
+        :return: dict with 'request_id' and 'reserved_instance_id' in case of successful operation.
+        """
+        params = {'Action': 'PurchaseReservedInstancesOffering',
+                  'ReservedInstancesOfferingId': offering_id,
+                  'InstanceCount': instance_count}
+
+        if limit_price is not None:
+            params['LimitPrice.Amount'] = float(limit_price)
+
+        if dry_run:
+            params['DryRun'] = True
+
+        response = self.connection.request(self.path, params=params).object
+        return response
+
     def ex_create_placement_group(self, name):
         """
         Creates a new placement group.
