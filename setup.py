@@ -126,7 +126,7 @@ class ApiDocsCommand(Command):
 
 forbid_publish()
 
-install_requires = ['requests']
+install_requires = ['requests', 'pytz==2018.5']
 if PY2_pre_26:
     install_requires.extend(['ssl', 'simplejson'])
 
