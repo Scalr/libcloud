@@ -46,7 +46,8 @@ __all__ = [
     'get_secure_random_string',
     'retry',
 
-    'ReprMixin'
+    'ReprMixin',
+    'PageList'
 ]
 
 # Error message which indicates a transient SSL error upon which request
@@ -397,3 +398,204 @@ def retry(retry_exceptions=None, retry_delay=None, timeout=None,
                     time.sleep(delay)
         return retry_loop
     return decorator
+
+
+class UnknownScope(Exception):
+    """ Error to signalize unknown scope in PageList.apply"""
+
+
+class PageList(object):
+    """
+    An Iterator that wraps list request functions to encapsulate pagination.
+
+    Usage example (this class needs to be inherited to implement
+        page_token_name, page_size_name, and next_page_token()
+        for the pagination to be possible):
+    1. Treat pager as unbroken list of elements
+    >>> node_pager = SomeCloudPageList(
+            connection.request,
+            (arg1,),
+            {'kwarg1': val1,
+             'kwarg2': val2},
+            page_size=20,
+            process_fn=lambda x: x.split(';'))
+    >>> for node in node_pager:  # node_pager will automatically "switch" pages
+            save_node_info(node)
+
+    2. Process elements page by page. (Note: the request may return next_token,
+        but the next page may be empty. In that case page() will return []
+        and only on the succeeding call it will return None)
+    >>> node_pager = SomeCloudPageList(
+            connection.request,
+            (arg1,),
+            {'kwarg1': val1,
+             'kwarg2': val2},
+            page_size=20,
+            process_fn=lambda x: x.split(';'))
+    >>> current_page = node_pager.page()
+    >>> while current_page:
+            for node in current_page:
+                do_work(node)
+            signal_batch_finished()
+            current_page = node_pager.page()
+    """
+    page_token_name = None
+    page_size_name = None
+
+    def __init__(self, request_fn, request_args, request_kwargs, page_size=0,
+            process_fn=None):
+        """
+        :param function request_fn: Function that accepts pagination parameter.
+        :param list request_args: List of function arguments.
+        :param dict request_kwargs: Dict of function keyword arguments
+        :param function process_fn: Function to be applied to return value of
+            `request_fn`. It must produce list of elements.
+        """
+        self.request_fn = request_fn
+        self.request_args = request_args
+        self.request_kwargs = request_kwargs
+        self.page_size = page_size
+        self.process_fn = process_fn
+        self.next_page_token = None
+        self.current_page = None
+        self.applied_functions = []
+
+    def __add__(self, other):
+        """
+        Will fetch elements from self, then from other
+        """
+        return PageListSum([self, other])
+
+    def apply(self, func, scope='element'):
+        """
+        Applies function to the page.
+
+        :param function func: function to be applied. Must accept 1 argument.
+        :param str scope: If scope is 'element' func will be applied to each
+            element. func must return an updated or new element.
+            If scope is 'page', then func will receive the whole
+            page as a list and the func must return a list.
+        """
+        if scope not in ['element', 'page']:
+            raise UnknownScope(
+                'The scope should be "element" or "page", got {}'
+                .format(scope))
+        self.applied_functions.append((func, scope))
+
+    def extract_next_page_token(self, response):
+        """
+        Returns value of the next page token/marker from the response.
+        Must return None to signalize that there are no more pages to request.
+
+        Subclasses need specify page_token_name and to implement this method
+        in order for page() method to know how to select pages.
+
+        :param object response: Response returned by `request_function()`.
+        """
+        raise NotImplementedError()
+
+    def update_request_kwds(self):
+        """
+        Updates token/identifier parameter of the next page and page size
+        for `request_function()`.
+        """
+        if self.page_token_name is not None:
+            self.request_kwargs[self.page_token_name] = self.next_page_token
+        if self.page_size_name is not None:
+            self.request_kwargs[self.page_size_name] = self.page_size
+
+    def has_more(self):
+        """
+        Returns True if there is still data to request.
+        """
+        return self.current_page is None \
+            or self.next_page_token is not None
+
+    def page(self):
+        """
+        Requests/lists next page of data. Applies next page token automatically
+        and transform function to the result of the request.
+        """
+        if not self.has_more():
+            return None
+
+        self.update_request_kwds()
+        response = self.request_fn(*self.request_args, **self.request_kwargs)
+
+        # If response is not a list, there should be process_fn to break response
+        # into elements and return a list of them.
+        if self.process_fn:
+            self.current_page = self.process_fn(response)
+        else:
+            self.current_page = response
+
+        # Applying delayed functions to the page.
+        for f, scope in self.applied_functions:
+            if scope == 'element':
+                self.current_page = [f(el) for el in self.current_page]
+            elif scope == 'page':
+                self.current_page = f(self.current_page)
+            else:
+                raise UnknownScope(
+                    'The scope should be "element" or "page", got {}'
+                    .format(scope))
+
+        # Saving page token for later use
+        self.next_page_token = self.extract_next_page_token(response)
+
+        return self.current_page
+
+    def __iter__(self):
+        """
+        Iterates over elements of all pages.
+        """
+        while self.has_more():
+            for item in self.page():
+                yield item
+
+
+class EmptyPageList(PageList):
+    """
+    Empty PageList iterator useful for when adding PageList together.
+    """
+
+    def __init__(self):
+        super(EmptyPageList, self).__init__(lambda: [], (), {})
+
+    def extract_next_page_token(self, response):
+        return None
+
+
+class PageListSum(PageList):
+    """
+    Iterator over PageLists
+    """
+
+    def __init__(self, page_lists=None):
+        self.page_lists = page_lists or []
+
+    def __add__(self, other):
+        """
+        Will fetch elements from self, then from other
+        """
+        self.page_lists.append(other)
+        return self
+
+    def has_more(self):
+        return any(pl.has_more() for pl in self.page_lists)
+
+    def page(self):
+        result = None
+        for pl in self.page_lists:
+            if pl.has_more():
+                result = pl.page()
+                if result:
+                    break
+        return result
+
+    @classmethod
+    def multiple_from_fn_iterator(cls, fn_iterator, *args, **kwargs):
+        """
+        Produces multiple PageLists for each function in fn_iterator.
+        """
+        return [cls(request_fn, *args, **kwargs) for request_fn in fn_iterator]

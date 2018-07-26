@@ -270,34 +270,6 @@ class GCENodeDriverTest(GoogleTestCase, TestCaseMixin):
             self.driver.ex_get_serial_output(node),
             'This is some serial\r\noutput for you.')
 
-    def test_ex_list(self):
-        d = self.driver
-        # Test the default case for all list methods
-        # (except list_volume_snapshots, which requires an arg)
-        for list_fn in (d.ex_list_addresses, d.ex_list_backendservices,
-                        d.ex_list_disktypes, d.ex_list_firewalls,
-                        d.ex_list_forwarding_rules, d.ex_list_healthchecks,
-                        d.ex_list_networks, d.ex_list_subnetworks,
-                        d.ex_list_project_images, d.ex_list_regions,
-                        d.ex_list_routes, d.ex_list_snapshots,
-                        d.ex_list_targethttpproxies, d.ex_list_targetinstances,
-                        d.ex_list_targetpools, d.ex_list_urlmaps,
-                        d.ex_list_zones, d.list_images, d.list_locations,
-                        d.list_nodes, d.list_sizes, d.list_volumes):
-            full_list = [item.name for item in list_fn()]
-            li = d.ex_list(list_fn)
-            iter_list = [item.name for sublist in li for item in sublist]
-            self.assertEqual(full_list, iter_list)
-
-        # Test paging & filtering with a single list function as they require
-        # additional test fixtures
-        list_fn = d.ex_list_regions
-        for count, sublist in zip((2, 1), d.ex_list(list_fn).page(2)):
-            self.assertTrue(len(sublist) == count)
-        for sublist in d.ex_list(list_fn).filter('name eq us-central1'):
-            self.assertTrue(len(sublist) == 1)
-            self.assertEqual(sublist[0].name, 'us-central1')
-
     def test_ex_list_addresses(self):
         address_list = self.driver.ex_list_addresses()
         address_list_all = self.driver.ex_list_addresses('all')

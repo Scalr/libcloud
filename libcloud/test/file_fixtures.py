@@ -30,7 +30,8 @@ FIXTURES_ROOT = {
     'dns': 'dns/fixtures',
     'backup': 'backup/fixtures',
     'openstack': 'compute/fixtures/openstack',
-    'container': 'container/fixtures'
+    'container': 'container/fixtures',
+    'extra': 'extra/fixtures'
 }
 
 
@@ -95,4 +96,9 @@ class ContainerFileFixtures(FileFixtures):
 class BackupFileFixtures(FileFixtures):
     def __init__(self, sub_dir=''):
         super(BackupFileFixtures, self).__init__(fixtures_type='backup',
+                                                 sub_dir=sub_dir)
+
+class ExtraFileFixtures(FileFixtures):
+    def __init__(self, sub_dir=''):
+        super(ExtraFileFixtures, self).__init__(fixtures_type='extra',
                                                  sub_dir=sub_dir)

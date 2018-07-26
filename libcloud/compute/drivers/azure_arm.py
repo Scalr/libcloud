@@ -21,9 +21,11 @@ http://azure.microsoft.com/en-us/services/virtual-machines/
 
 import base64
 import binascii
-import uuid
 import os
+import six
 import time
+
+import six
 
 from libcloud.common.azure_arm import AzureResourceManagementConnection
 from libcloud.compute.providers import Provider
@@ -36,32 +38,13 @@ from libcloud.common.types import LibcloudError
 from libcloud.storage.types import ObjectDoesNotExistError
 from libcloud.common.exceptions import BaseHTTPError
 from libcloud.storage.drivers.azure_blobs import AzureBlobsStorageDriver
+from libcloud.utils import misc as misc_utils
 from libcloud.utils.py3 import basestring
 from libcloud.utils import iso8601
 
 
 RESOURCE_API_VERSION = '2016-04-30-preview'
 NIC_API_VERSION = '2016-09-01'
-
-
-class AzureImage(NodeImage):
-    """Represents a Marketplace node image that an Azure VM can boot from."""
-
-    def __init__(self, version, sku, offer, publisher, location, driver):
-        self.publisher = publisher
-        self.offer = offer
-        self.sku = sku
-        self.version = version
-        self.location = location
-        urn = "%s:%s:%s:%s" % (self.publisher, self.offer,
-                               self.sku, self.version)
-        name = "%s %s %s %s" % (self.publisher, self.offer,
-                                self.sku, self.version)
-        super(AzureImage, self).__init__(urn, name, driver)
-
-    def __repr__(self):
-        return (('<AzureImage: id=%s, name=%s, location=%s>')
-                % (self.id, self.name, self.location))
 
 
 class AzureVhdImage(NodeImage):
@@ -160,6 +143,24 @@ class AzureIPAddress(object):
     def __repr__(self):
         return (('<AzureIPAddress: id=%s, name=%s ...>')
                 % (self.id, self.name))
+
+
+class AzurePageList(misc_utils.PageList):
+    page_token_name = None
+    page_size_name = None
+
+    def __init__(self, *args, **kwargs):
+        super(AzurePageList, self).__init__(*args, **kwargs)
+        self.page_size = 1000
+
+    def update_request_kwds(self):
+        if self.next_page_token:
+            parsed_url = six.moves.urllib.parse.urlparse(self.next_page_token)
+            self.request_kwargs['params'] = six.moves.urllib.parse.parse_qs(
+                parsed_url.query)
+
+    def extract_next_page_token(self, response):
+        return response.object.get('nextLink')
 
 
 class AzureNodeDriver(NodeDriver):
@@ -265,8 +266,21 @@ class AzureNodeDriver(NodeDriver):
                                     params={"api-version": "2015-06-15"})
         return [self._to_node_size(d) for d in r.object["value"]]
 
-    def list_images(self, location=None, ex_publisher=None, ex_offer=None,
-                    ex_sku=None, ex_version=None):
+    def _to_image(self, data):
+        return NodeImage(
+            id=data['id'],
+            name=data['name'],
+            driver=self,
+            extra={
+                'properties': data['properties'],
+                'type': data['type'],
+                'tags': data.get('tags', {})
+            })
+
+    def list_images(self, *args, **kwargs):
+        return list(self.iterate_images(*args, **kwargs))
+
+    def iterate_images(self, location=None, ex_resource_group=None):
         """
         List available VM images to boot from.
 
@@ -274,66 +288,31 @@ class AzureNodeDriver(NodeDriver):
         (if None, use default location specified as 'region' in __init__)
         :type location: :class:`.NodeLocation`
 
-        :param ex_publisher: Filter by publisher, or None to list
-        all publishers.
-        :type ex_publisher: ``str``
-
-        :param ex_offer: Filter by offer, or None to list all offers.
-        :type ex_offer: ``str``
-
-        :param ex_sku: Filter by sku, or None to list all skus.
-        :type ex_sku: ``str``
-
-        :param ex_version: Filter by version, or None to list all versions.
-        :type ex_version: ``str``
-
         :return: list of node image objects.
-        :rtype: ``list`` of :class:`.AzureImage`
+        :rtype: ``list`` of :class:`.NodeImage`
         """
 
-        images = []
-
-        if location is None:
-            locations = [self.default_location]
+        if ex_resource_group:
+            action = "/subscriptions/%s/resourceGroups/%s/" \
+                     "providers/Microsoft.Compute/images" \
+                     % (self.subscription_id, ex_resource_group)
         else:
-            locations = [location]
+            action = "/subscriptions/%s/providers/Microsoft.Compute/" \
+                     "images" \
+                     % (self.subscription_id)
 
-        for loc in locations:
-            if not ex_publisher:
-                publishers = self.ex_list_publishers(loc)
-            else:
-                publishers = [(
-                    "/subscriptions/%s/providers/Microsoft"
-                    ".Compute/locations/%s/publishers/%s" %
-                    (self.subscription_id, loc.id, ex_publisher),
-                    ex_publisher)]
+        def split_to_images(response):
+            return [self._to_image(img)
+                    for img in response.object["value"]]
 
-            for pub in publishers:
-                if not ex_offer:
-                    offers = self.ex_list_offers(pub[0])
-                else:
-                    offers = [("%s/artifacttypes/vmimage/offers/%s" % (
-                        pub[0], ex_offer), ex_offer)]
+        image_paginator = AzurePageList(
+            self.connection.request,
+            (action,),
+            {'params': {"api-version": "2017-12-01"}},
+            process_fn=split_to_images)
 
-                for off in offers:
-                    if not ex_sku:
-                        skus = self.ex_list_skus(off[0])
-                    else:
-                        skus = [("%s/skus/%s" % (off[0], ex_sku), ex_sku)]
+        return image_paginator
 
-                    for sku in skus:
-                        if not ex_version:
-                            versions = self.ex_list_image_versions(sku[0])
-                        else:
-                            versions = [("%s/versions/%s" % (
-                                sku[0], ex_version), ex_version)]
-
-                        for v in versions:
-                            images.append(AzureImage(v[1], sku[1],
-                                                     off[1], pub[1],
-                                                     loc.id,
-                                                     self.connection.driver))
-        return images
 
     def get_image(self, image_id, location=None):
         """Returns a single node image from a provider.
@@ -348,9 +327,8 @@ class AzureNodeDriver(NodeDriver):
         (if None, use default location specified as 'region' in __init__)
         :type location: :class:`.NodeLocation`
 
-        :rtype :class:`.AzureImage`: or :class:`.AzureVhdImage`:
-        :return: AzureImage or AzureVhdImage instance on success.
-
+        :rtype :class:`.NodeImage`: or :class:`.AzureVhdImage`:
+        :return: NodeImage or AzureVhdImage instance on success.
         """
 
         if image_id.startswith("http"):
@@ -362,7 +340,10 @@ class AzureNodeDriver(NodeDriver):
                                  ex_offer, ex_sku, ex_version)
             return i[0] if i else None
 
-    def list_nodes(self, ex_resource_group=None,
+    def list_nodes(self, *args, **kwargs):
+        return list(self.iterate_nodes(*args, **kwargs))
+
+    def iterate_nodes(self, ex_resource_group=None,
                    ex_fetch_nic=True,
                    ex_fetch_power_state=True):
         """
@@ -394,12 +375,20 @@ class AzureNodeDriver(NodeDriver):
             action = "/subscriptions/%s/providers/Microsoft.Compute/" \
                      "virtualMachines" \
                      % (self.subscription_id)
-        r = self.connection.request(action,
-                                    params={"api-version": "2015-06-15"})
-        return [self._to_node(n,
-                              fetch_nic=ex_fetch_nic,
-                              fetch_power_state=ex_fetch_power_state)
-                for n in r.object["value"]]
+
+        def split_to_nodes(response):
+            return [self._to_node(n,
+                                  fetch_nic=ex_fetch_nic,
+                                  fetch_power_state=ex_fetch_power_state)
+                    for n in response.object["value"]]
+
+        node_paginator = AzurePageList(
+            self.connection.request,
+            (action,),
+            {'params': {"api-version": "2015-06-15"}},
+            process_fn=split_to_nodes)
+
+        return node_paginator
 
     def create_node(self,
                     name,
@@ -454,7 +443,7 @@ class AzureNodeDriver(NodeDriver):
         :type size:   :class:`.NodeSize`
 
         :param image:  OS Image to boot on node. (required)
-        :type image:  :class:`.AzureImage`
+        :type image:  :class:`.NodeImage`
 
         :param location: Which data center to create a node in.
         (if None, use default location specified as 'region' in __init__)
@@ -575,13 +564,10 @@ class AzureNodeDriver(NodeDriver):
                 raise LibcloudError(
                     "Creating managed OS disk from %s image "
                     "type is not supported." % type(image))
-        elif isinstance(image, AzureImage):
+        elif isinstance(image, NodeImage):
             storage_profile = {
                 "imageReference": {
-                    "publisher": image.publisher,
-                    "offer": image.offer,
-                    "sku": image.sku,
-                    "version": image.version
+                    "id": image.id
                 },
                 "osDisk": {
                     "name": name,
@@ -605,7 +591,7 @@ class AzureNodeDriver(NodeDriver):
                 }
         else:
             raise LibcloudError(
-                "Unknown image type %s, expected one of AzureImage, "
+                "Unknown image type %s, expected one of NodeImage, "
                 "AzureVhdImage." % type(image))
 
         data = {
@@ -897,7 +883,10 @@ class AzureNodeDriver(NodeDriver):
             ex_resource_group=ex_resource_group
         )
 
-    def list_volumes(self, ex_resource_group=None):
+    def list_volumes(self, *args, **kwargs):
+        return list(self.iterate_volumes(*args, **kwargs))
+
+    def iterate_volumes(self, ex_resource_group=None):
         """
         Lists all the disks under a resource group or subscription.
 
@@ -919,14 +908,18 @@ class AzureNodeDriver(NodeDriver):
             resource_group=ex_resource_group
         )
 
-        response = self.connection.request(
-            action,
-            method='GET',
-            params={
-                'api-version': RESOURCE_API_VERSION
-            }
-        )
-        return [self._to_volume(volume) for volume in response.object['value']]
+        def split_to_volumes(response):
+            return [self._to_volume(volume)
+                    for volume in response.object['value']]
+
+        volume_paginator = AzurePageList(
+            self.connection.request,
+            (action,),
+            {'method': 'GET',
+             'params': {"api-version": RESOURCE_API_VERSION}},
+            process_fn=split_to_volumes)
+
+        return volume_paginator
 
     def attach_volume(self, node, volume, ex_lun=None,
                       ex_vhd_uri=None, ex_vhd_create=False, **ex_kwargs):
@@ -1112,7 +1105,10 @@ class AzureNodeDriver(NodeDriver):
         return [snapshot for snapshot in self.list_snapshots()
                 if snapshot.extra['source_id'] == volume.id]
 
-    def list_snapshots(self, ex_resource_group=None):
+    def list_snapshots(self, *args, **kwargs):
+        return list(self.iterate_snapshots(*args, **kwargs))
+
+    def iterate_snapshots(self, ex_resource_group=None):
         """
         Lists all the snapshots under a resource group or subscription.
 
@@ -1134,14 +1130,18 @@ class AzureNodeDriver(NodeDriver):
             resource_group=ex_resource_group
         )
 
-        response = self.connection.request(
-            action,
-            method='GET',
-            params={
-                'api-version': RESOURCE_API_VERSION
-            }
-        )
-        return [self._to_snapshot(snap) for snap in response.object['value']]
+        def split_to_snapshots(response):
+            return [self._to_snapshot(snap)
+                    for snap in response.object['value']]
+
+        snapshot_paginator = AzurePageList(
+            self.connection.request,
+            (action,),
+            {'method': 'GET',
+             'params': {"api-version": RESOURCE_API_VERSION}},
+            process_fn=split_to_snapshots)
+
+        return snapshot_paginator
 
     def destroy_volume_snapshot(self, snapshot):
         """
@@ -1286,8 +1286,8 @@ class AzureNodeDriver(NodeDriver):
             },
         )
 
-    def ex_get_ratecard(self, offer_durable_id, currency='USD',
-                        locale='en-US', region='US'):
+    def ex_get_rate_card(self, offer_durable_id, currency='USD',
+                         locale='en-US', region='US', api_version='2015-06-01-preview'):
         """
         Get rate card
 
@@ -1303,20 +1303,86 @@ class AzureNodeDriver(NodeDriver):
         :type locale: ``str``
 
         :param region: Region (two-letter code) (default: "US")
-        :type regions: ``str``
+        :type region: ``str``
 
-        :return: A dictionary of rates whose ID's correspond to nothing at all
+        :param api_version: API version
+        :type api_version: ``str``
+
+        :return: A dictionary of rates
         :rtype: ``dict``
         """
 
         action = "/subscriptions/%s/providers/Microsoft.Commerce/" \
                  "RateCard" % (self.subscription_id,)
-        params = {"api-version": "2016-08-31-preview",
-                  "$filter": "OfferDurableId eq 'MS-AZR-%s' and "
+        params = {"api-version": api_version,
+                  "$filter": "OfferDurableId eq '%s' and "
                              "Currency eq '%s' and "
                              "Locale eq '%s' and "
                              "RegionInfo eq '%s'" %
                              (offer_durable_id, currency, locale, region)}
+        r = self.connection.request(action, params=params)
+        return r.object
+
+    def ex_iterate_usage_aggregates(self, reported_start_time, reported_end_time,
+                                    resolution='Hourly', show_details=True,
+                                    usage_api_version='2015-06-01-preview'):
+
+        """Get usage aggregate data for provided period.
+
+        :param reported_start_time: billing period start time
+        :type reported_start_time: datetime.datetime
+
+        :param reported_end_time: billing period end time
+        :type reported_end_time: datetime.datetime
+
+        :param resolution: 'Hourly' or 'Daily' aggregation results
+        :type resolution: str
+
+        :param show_details: instance-level details with the usage data
+        :type show_details: bool
+
+        :param usage_api_version: Usage API version
+        :type usage_api_version: str
+
+        :return: 1000 usage records (Azure API limit, not configurable)
+        :rtype: typing.Iterator[typing.Dict]
+        """
+
+        params = {
+            'aggregationGranularity': resolution,
+            'api-version': usage_api_version,
+            'reportedStartTime': reported_start_time.strftime('%Y-%m-%dT%H:%M:%S+00:00'),
+            'reportedEndTime': reported_end_time.strftime('%Y-%m-%dT%H:%M:%S+00:00'),
+            'showDetails': 'true' if show_details else 'false',
+        }
+        action = '/subscriptions/%s/providers/Microsoft.Commerce/' \
+                 'UsageAggregates' % self.subscription_id
+
+        while True:
+            r = self.connection.request(action, params=params)
+
+            yield r.object
+
+            next_link = r.object.get('nextLink')
+            if not next_link:
+                break
+
+            parsed_url = six.moves.urllib.parse.urlparse(next_link)
+            params = six.moves.urllib.parse.parse_qs(parsed_url.query)
+
+    def ex_get_active_billing_period(self, api_version='2017-04-24-preview'):
+        """Get subscription active billing period
+
+        :param str api_version: api version
+        :rtype: dict
+        """
+        action = '/subscriptions/%s/providers/Microsoft.Billing/' \
+                 'billingPeriods' % self.subscription_id
+
+        params = {
+            'api-version': api_version,
+            '$top': 1
+        }
         r = self.connection.request(action, params=params)
         return r.object
 
