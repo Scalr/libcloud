@@ -13,10 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import time
-
-from email.utils import parsedate_tz, mktime_tz
-
 __all__ = [
     'BaseHTTPError',
     'RateLimitReachedError',
@@ -58,15 +54,13 @@ class RateLimitReachedError(BaseHTTPError):
     message = 'Rate limit exceeded'
     retry_after = None
 
-    def __init__(self, *args, **kwargs):
-        headers = kwargs.pop('headers', None)
-        super(RateLimitReachedError, self).__init__(self.code,
-                                                    self.message,
-                                                    headers)
-        if self.headers is not None:
-            self.retry_after = int(self.headers.get('retry-after', 0))
-        else:
-            self.retry_after = 0
+    def __init__(self, code, message, headers=None):
+        if headers is not None:
+            self.retry_after = int(headers.get('retry_after', None))
+        super(RateLimitReachedError, self).__init__(
+            code if code is not None else self.code,
+            message if message is not None else self.message,
+            headers=headers)
 
 
 _error_classes = [RateLimitReachedError]
@@ -80,34 +74,9 @@ def exception_from_message(code, message, headers=None):
 
     Usage:
 
-    If headers include Retry-After, RFC 2616 says that its value may be one of
-    two formats: HTTP-date or delta-seconds, for example:
-
-    Retry-After: Fri, 31 Dec 1999 23:59:59 GMT
-    Retry-After: 120
-
-    If Retry-After comes in HTTP-date, it'll be translated to a positive
-    delta-seconds value when passing it to the exception constructor.
-
-    Also, RFC 2616 says that Retry-After isn't just only applicable to 429
-    HTTP status, but also to other responses, like 503 and 3xx.
-
-    Usage::
-        raise exception_from_message(code=self.status,
-                                     message=self.parse_error(),
-                                     headers=self.headers)
+    >>>    raise exception_from_message(
+    >>>        code=response.status,
+    >>>        message=response.parse_error())
     """
-    kwargs = {
-        'code': code,
-        'message': message,
-        'headers': headers
-    }
-
-    if headers and 'retry-after' in headers:
-        http_date = parsedate_tz(headers['retry-after'])
-        if http_date is not None:
-            # Convert HTTP-date to delay-seconds
-            delay = max(0, int(mktime_tz(http_date) - time.time()))
-            headers['retry-after'] = str(delay)
     cls = _code_map.get(code, BaseHTTPError)
     return cls(code, message, headers=headers)

@@ -2,7 +2,9 @@ language: python
 sudo: false
 # Add or remove version for match with Travis support
 python:
+    - 2.6
     - 2.7
+    - 3.3
     - 3.4
     - 3.5
     - 3.6
@@ -16,7 +18,7 @@ addons:
   apt:
     packages:
       - graphviz
-      - libvirt-dev
+      - libvirt-bin
 
 matrix:
   fast_finish: true
@@ -42,10 +44,18 @@ matrix:
           packages:
             - graphviz
             - gcc
-            - libvirt-dev
+            - libvirt-bin
       # Trigger ReadTheDocs build on docs builder
       after_success:
         - ./contrib/trigger_rtd_build.py 8284
+  # For now allow failures of all the builds which use lxml
+  allow_failures:
+    - env: ENV=coverage
+    - env:
+      python: pypy3
+    - env:
+      python: pypy
+      # Trigger ReadTheDocs build
 
 install:
   - pip install --upgrade "pip==9.0.1"
