@@ -104,12 +104,13 @@ class OvhConnection(ConnectionUserAndKey):
         }
         httpcon = LibcloudConnection(host=self.host, port=443)
         httpcon.request(method='POST', url=action, body=data, headers=headers)
-        response = JsonResponse(httpcon.getresponse(), httpcon)
+        response = httpcon.getresponse()
 
         if response.status == httplib.UNAUTHORIZED:
             raise InvalidCredsError()
 
-        json_response = response.parse_body()
+        body = response.read()
+        json_response = json.loads(body)
         httpcon.close()
         return json_response
 

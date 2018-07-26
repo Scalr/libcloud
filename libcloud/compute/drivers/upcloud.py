@@ -27,7 +27,6 @@ from libcloud.common.types import InvalidCredsError
 from libcloud.common.upcloud import UpcloudCreateNodeRequestBody
 from libcloud.common.upcloud import UpcloudNodeDestroyer
 from libcloud.common.upcloud import UpcloudNodeOperations
-from libcloud.common.upcloud import PlanPrice
 
 
 class UpcloudResponse(JsonResponse):
@@ -106,22 +105,14 @@ class UpcloudDriver(NodeDriver):
         response = self.connection.request('1.2/zone')
         return self._to_node_locations(response.object['zones']['zone'])
 
-    def list_sizes(self, location=None):
+    def list_sizes(self):
         """
         List available plans
 
-        :param location: Location of the deployement. Price depends on
-        location. lf location is not given or price not found for
-        location, price will be None (optional)
-        :type location: :class:`.NodeLocation`
-
         :rtype: ``list`` of :class:`NodeSize`
         """
-        prices_response = self.connection.request('1.2/price')
         response = self.connection.request('1.2/plan')
-        return self._to_node_sizes(response.object['plans']['plan'],
-                                   prices_response.object['prices']['zone'],
-                                   location)
+        return self._to_node_sizes(response.object['plans']['plan'])
 
     def list_images(self):
         """
@@ -272,19 +263,16 @@ class UpcloudDriver(NodeDriver):
         Zone_id format [country]_[city][number], like fi_hel1"""
         return zone_id.split('-')[0].upper()
 
-    def _to_node_sizes(self, plans, prices, location):
-        plan_price = PlanPrice(prices)
-        return [self._to_node_size(plan, plan_price, location)
-                for plan in plans]
+    def _to_node_sizes(self, plans):
+        return [self._construct_node_size(plan) for plan in plans]
 
-    def _to_node_size(self, plan, plan_price, location):
+    def _construct_node_size(self, plan):
         extra = self._copy_dict(('core_number', 'storage_tier'), plan)
         return NodeSize(id=plan['name'], name=plan['name'],
                         ram=plan['memory_amount'],
                         disk=plan['storage_size'],
                         bandwidth=plan['public_traffic_out'],
-                        price=plan_price.get_price(plan['name'], location),
-                        driver=self,
+                        price=None, driver=self,
                         extra=extra)
 
     def _to_node_images(self, images):

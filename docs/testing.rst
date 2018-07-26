@@ -34,7 +34,10 @@ To run the tests on all the supported Python versions run the following command:
 
 .. sourcecode:: bash
 
-    tox
+    sudo tox
+
+You need to run this command as a root user, because Python 2.5 depends on ssl
+module and you need root permissions to install it.
 
 Running Tests Manually
 ----------------------
@@ -78,7 +81,7 @@ contains the test coverage.
 Running tests inside a Docker container
 ---------------------------------------
 
-To run the tests on all the supported Python versions, run
+To run the tests on all the supported Python versions (minus Python 2.5), run
 the following command:
 
 .. sourcecode:: bash

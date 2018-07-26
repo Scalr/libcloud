@@ -406,7 +406,6 @@ class AzureNodeDriver(NodeDriver):
                     ex_tags={},
                     ex_customdata="",
                     ex_use_managed_disks=False,
-                    ex_disk_size=None,
                     ex_storage_account_type="Standard_LRS"):
         """Create a new node instance. This instance will be started
         automatically.
@@ -504,9 +503,6 @@ class AzureNodeDriver(NodeDriver):
             storage accounts on your own. Managed disks may not be available
             in all regions (default False).
         :type ex_use_managed_disks: ``bool``
-
-        :param ex_disk_size: Custom OS disk size in GB
-        :type ex_disk_size: ``int``
 
         :param ex_storage_account_type: The Storage Account type,
             ``Standard_LRS``(HDD disks) or ``Premium_LRS``(SSD disks).
@@ -617,11 +613,6 @@ class AzureNodeDriver(NodeDriver):
                 }
             }
         }
-
-        if ex_disk_size:
-            data['properties']['storageProfile']['osDisk'].update({
-                'diskSizeGB': ex_disk_size
-            })
 
         if ex_customdata:
             data["properties"]["osProfile"]["customData"] = \

@@ -36,10 +36,11 @@ libcloud.utils.SHOW_DEPRECATION_WARNING = False
 # installed / available
 PY2 = sys.version_info[0] == 2
 PY3 = sys.version_info[0] == 3
-PY3_pre_34 = PY3 and sys.version_info < (3, 4)
+PY2_pre_25 = PY2 and sys.version_info < (2, 5)
 PY2_pre_26 = PY2 and sys.version_info < (2, 6)
 PY2_pre_27 = PY2 and sys.version_info < (2, 7)
 PY2_pre_279 = PY2 and sys.version_info < (2, 7, 9)
+PY3_pre_32 = PY3 and sys.version_info < (3, 2)
 
 HTML_VIEWSOURCE_BASE = 'https://svn.apache.org/viewvc/libcloud/trunk'
 PROJECT_BASE_DIR = 'http://libcloud.apache.org'
@@ -63,10 +64,15 @@ TEST_REQUIREMENTS = [
     'pytest-runner'
 ]
 
-if PY2_pre_279:
+if PY2_pre_279 or PY3_pre_32:
     TEST_REQUIREMENTS.append('backports.ssl_match_hostname')
 
-if PY2_pre_27 or PY3_pre_34:
+if PY2_pre_27:
+    unittest2_required = True
+else:
+    unittest2_required = False
+
+if PY2_pre_25:
     version = '.'.join([str(x) for x in sys.version_info[:3]])
     print('Version ' + version + ' is not supported. Supported versions are ' +
           ', '.join(SUPPORTED_VERSIONS))
@@ -120,13 +126,12 @@ class ApiDocsCommand(Command):
 
 forbid_publish()
 
-install_requires = ['requests']
+install_requires = ['requests', 'pytz==2018.5']
+if PY2_pre_26:
+    install_requires.extend(['ssl', 'simplejson'])
 
-if PY2_pre_279:
+if PY2_pre_279 or PY3_pre_32:
     install_requires.append('backports.ssl_match_hostname')
-
-needs_pytest = {'pytest', 'test', 'ptr'}.intersection(sys.argv)
-pytest_runner = ['pytest-runner'] if needs_pytest else []
 
 setup(
     name='apache-libcloud',
@@ -144,7 +149,7 @@ setup(
     package_data={'libcloud': get_data_files('libcloud', parent='libcloud')},
     license='Apache License (2.0)',
     url='http://libcloud.apache.org/',
-    setup_requires=pytest_runner,
+    setup_requires=['pytest-runner'],
     tests_require=TEST_REQUIREMENTS,
     cmdclass={
         'apidocs': ApiDocsCommand,
@@ -167,6 +172,5 @@ setup(
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: Implementation :: CPython',
-        'Programming Language :: Python :: Implementation :: PyPy'
-    ]
-)
+        'Programming Language :: Python :: Implementation :: PyPy']
+    )

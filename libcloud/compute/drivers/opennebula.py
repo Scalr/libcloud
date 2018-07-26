@@ -129,7 +129,7 @@ class OpenNebulaResponse(XmlResponse):
         :return: True is success, else False.
         """
         i = int(self.status)
-        return 200 <= i <= 299
+        return i >= 200 and i <= 299
 
     def parse_error(self):
         """
