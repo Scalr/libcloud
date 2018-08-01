@@ -528,8 +528,9 @@ class VSphereNodeDriver(NodeDriver):
                 if vm_properties['summary.config'].template is True:
                     continue
                 node = self._to_node(vm_entity, vm_properties)
-                node.created_at = creation_times.get(node.id)
-                nodes.append(node)
+                if node:
+                    node.created_at = creation_times.get(node.id)
+                    nodes.append(node)
             return nodes
 
         self._get_datacenter_urls_map.cache_clear()
@@ -1071,6 +1072,10 @@ class VSphereNodeDriver(NodeDriver):
         :param vm_properties: VM properties.
         :type vm_properties: dict
         """
+        if vm_entity.config is None:
+            # If there's no config, it means the VM is still preparing.
+            # or almost removed. We don't need it then.
+            return None
         if vm_properties is None:
             vm_properties = {}
         datastore_url = vm_properties.get('config.datastoreUrl') \
