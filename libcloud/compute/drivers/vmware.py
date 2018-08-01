@@ -938,12 +938,12 @@ class VSphereNodeDriver(NodeDriver):
         :param begin_time: The beginning of the time range. If this property is
             not set, then events are collected from the earliest
             time in the database. (optional)
-        :type begin_time: :class:`datatime.datatime`
+        :type begin_time: :class:`datetime.datetime`
 
         :param end_time: The end of the time range. If this property is not
             specified, then events are collected up to the latest
             time in the database. (optional)
-        :type end_time: :class:`datatime.datatime`
+        :type end_time: :class:`datetime.datetime`
 
         :param userlist: This option specifies users used to filter event
             history. (optional)
@@ -1072,14 +1072,18 @@ class VSphereNodeDriver(NodeDriver):
         :param vm_properties: VM properties.
         :type vm_properties: dict
         """
-        if vm_entity.config is None:
-            # If there's no config, it means the VM is still preparing.
-            # or almost removed. We don't need it then.
-            return None
         if vm_properties is None:
             vm_properties = {}
-        datastore_url = vm_properties.get('config.datastoreUrl') \
-            or vm_entity.config.datastoreUrl
+        try:
+            datastore_url = vm_properties.get(
+                'config.datastoreUrl',
+                vm_entity.config.datastoreUrl)
+        except AttributeError:
+            # If there's no config and consequently datastoreUrl, it means
+            # the VM is still preparing, or is almost removed.
+            # In that case we don't need it.
+            return None
+
         summary = vm_properties.get('summary') or vm_entity.summary
         config = vm_properties.get('summary.config') or summary.config
         runtime = vm_properties.get('summary.runtime') or summary.runtime
