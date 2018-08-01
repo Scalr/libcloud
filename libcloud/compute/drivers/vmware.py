@@ -525,7 +525,8 @@ class VSphereNodeDriver(NodeDriver):
         def result_to_nodes(result):
             nodes = []
             for vm_entity, vm_properties in result.items():
-                if vm_properties['summary.config'].template is True:
+                if not vm_properties.get('summary.config') \
+                        or vm_properties['summary.config'].template is True:
                     continue
                 node = self._to_node(vm_entity, vm_properties)
                 if node:
@@ -576,7 +577,8 @@ class VSphereNodeDriver(NodeDriver):
         def result_to_images(result):
             images = []
             for vm_entity, vm_properties in result.items():
-                if vm_properties['summary.config'].template is False:
+                if not vm_properties.get('summary.config') \
+                        or vm_properties['summary.config'].template is False:
                     continue
                 image = self._to_image(vm_entity, vm_properties)
                 if image:
