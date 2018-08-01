@@ -579,9 +579,10 @@ class VSphereNodeDriver(NodeDriver):
                 if vm_properties['summary.config'].template is False:
                     continue
                 image = self._to_image(vm_entity, vm_properties)
-                image.created_at = creation_times.get(
-                    image.extra['managed_object_id'])
-                images.append(image)
+                if image:
+                    image.created_at = creation_times.get(
+                        image.extra['managed_object_id'])
+                    images.append(image)
             return images
 
         self._get_datacenter_urls_map.cache_clear()
@@ -1142,8 +1143,16 @@ class VSphereNodeDriver(NodeDriver):
         """
         if vm_properties is None:
             vm_properties = {}
-        datastore_url = vm_properties.get('config.datastoreUrl') \
-            or vm_entity.config.datastoreUrl
+        try:
+            datastore_url = vm_properties.get(
+                'config.datastoreUrl',
+                vm_entity.config.datastoreUrl)
+        except AttributeError:
+            # If there's no config and consequently datastoreUrl, it means
+            # the image is still preparing, or is almost removed.
+            # In that case we don't need it.
+            return None
+
         config = vm_properties.get('summary.config') or vm_entity.summary.config
 
         return NodeImage(
