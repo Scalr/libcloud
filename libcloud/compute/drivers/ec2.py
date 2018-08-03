@@ -6195,7 +6195,8 @@ class BaseEC2NodeDriver(NodeDriver):
                 'timestamp': timestamp,
                 'output': output}
 
-    def ex_list_reserved_nodes(self, params=None, filters=None, ids=None):
+    def ex_list_reserved_nodes(self, offering_class=None, offering_type=None,
+                               dry_run=False, filters=None, ids=None):
         """
         Lists all reserved instances/nodes which can be purchased from Amazon
         for one or three year terms. Reservations are made at a region level
@@ -6203,9 +6204,20 @@ class BaseEC2NodeDriver(NodeDriver):
 
         More information can be found at http://goo.gl/ulXCC7.
 
-        :param params: dict with request parameters. Available keys: ['OfferingClass',
-            'OfferingType', 'DryRun'].
-        :type params: dict
+        :param offering_class: Describes whether the Reserved Instance is Standard or Convertible.
+        :type offering_class: str
+
+        :param offering_type: The Reserved Instance offering type. If you are using tools that
+            predate the 2011-11-01 API version, you only have access to the Medium Utilization
+            Reserved Instance offering type. Valid Values: Heavy Utilization | Medium Utilization |
+            Light Utilization | No Upfront | Partial Upfront | All Upfront
+        :type offering_type: str
+
+        :param dry_run: Checks whether you have the required permissions for the action,
+            without actually making the request, and provides an error response.
+            If you have the required permissions, the error response is DryRunOperation.
+            Otherwise, it is UnauthorizedOperation.
+        :type dry_run: bool
 
         :param filters: dict with request filter. Those values will be translated into Filter.N
           format. Available keys: ['availability-zone', 'duration', 'end', 'fixed-price',
@@ -6219,18 +6231,22 @@ class BaseEC2NodeDriver(NodeDriver):
         :return: list of ``EC2ReservedNode`` objects.
         :rtype: list
         """
-        req_params = {'Action': 'DescribeReservedInstances'}
+        params = {'Action': 'DescribeReservedInstances'}
+
+        if offering_class:
+            params['OfferingClass'] = offering_class
+        if offering_type:
+            params['OfferingType'] = offering_type
+        if dry_run:
+            params['DryRun'] = dry_run
 
         if ids:
-            req_params.update(self._pathlist('ReservedInstancesId', ids))
+            params.update(self._pathlist('ReservedInstancesId', ids))
 
         if filters:
-            req_params.update(self._build_filters(filters))
+            params.update(self._build_filters(filters))
 
-        if params:
-            req_params.update(params)
-
-        response = self.connection.request(self.path, params=req_params).object
+        response = self.connection.request(self.path, params=params).object
 
         return self._to_reserved_nodes(response, 'reservedInstancesSet/item')
 
