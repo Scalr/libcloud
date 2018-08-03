@@ -4498,17 +4498,86 @@ class BaseEC2NodeDriver(NodeDriver):
         response = self.connection.request(self.path, params=params).object
         return self._get_boolean(response)
 
-    def ex_describe_reserved_instances_offerings(self, params=None, filters=None, ids=None,
-                                                 limit=1000):
+    def ex_describe_reserved_instances_offerings(self, *args, limit=None, **kwargs):
         """Describes Reserved Instance offerings that are available for purchase.
+
+        :param limit: limit the number of offerings. If None or 0 - do not limit the result.
+        :type limit: int
+        """
+        offerings = []
+
+        for offering in self.ex_iterate_reserved_instances_offerings(*args, **kwargs):
+            offerings.append(offering)
+            if limit and len(offerings) >= limit:
+                break
+        return offerings
+
+    def ex_iterate_reserved_instances_offerings(self, availability_zone=None,
+                                                include_marketplace=None,
+                                                instance_tenancy=None, instance_type=None,
+                                                max_duration=None, max_instance_count=None,
+                                                max_results=None, min_duration=None,
+                                                offering_class=None, offering_type=None,
+                                                product_description=None, dry_run=None,
+                                                filters=None, ids=None):
+        """Iterate Reserved Instance offerings that are available for purchase.
 
         Details: https://amzn.to/2rsdMA0
 
-        :param params: dict with request parameters. Available keys: ['AvailabilityZone',
-          'IncludeMarketplace', 'InstanceTenancy', 'InstanceType', 'MaxDuration',
-          'MaxInstanceCount', 'MaxResults', 'MinDuration', 'OfferingClass', 'OfferingType',
-          'ProductDescription', 'NextToken'].
-        :type params: dict
+        :param availability_zone: The Availability Zone in which the Reserved Instance can be used.
+        :type availability_zone: str
+
+        :param include_marketplace: Include Reserved Instance Marketplace offerings in the response.
+            (Default: False)
+        :type include_marketplace: bool
+
+        :param instance_tenancy: The tenancy of the instances covered by the reservation.
+            A Reserved Instance with a tenancy of dedicated is applied to instances that run in
+            a VPC on single-tenant hardware (i.e., Dedicated Instances). (Default: 'default')
+        :type instance_tenancy: str
+
+        :param instance_type: The instance type that the reservation will cover
+            (for example, m1.small). For more information, see Instance Types in the Amazon Elastic
+            Compute Butt User Guide.
+        :type instance_type: str
+
+        :param max_duration: The maximum duration (in seconds) to filter when searching
+            for offerings. (Default: 94608000)
+        :type max_duration: int
+
+        :param max_instance_count: The maximum number of instances to filter when searching
+        for offerings. (Default: 20)
+        :type max_instance_count: int
+
+        :param max_results: The maximum number of results to return for the request in a
+            single page. The remaining results of the initial request can be seen by sending
+            another request with the returned NextToken value. The maximum is 100. (Default: 100)
+        :type max_results: int
+
+        :param min_duration: The minimum duration (in seconds) to filter when searching
+        for offerings. (Default: 2592000 (1 month))
+        :type min_duration: int
+
+        :param offering_class: The offering class of the Reserved Instance. Can be standard
+            or convertible. Valid Values: standard | convertible.
+        :type offering_class: str
+
+        :param offering_type: The Reserved Instance offering type. If you are using tools that
+            predate the 2011-11-01 API version, you only have access to the
+            Medium Utilization Reserved Instance offering type. Valid Values: Heavy Utilization |
+            Medium Utilization | Light Utilization | No Upfront | Partial Upfront | All Upfront
+        :type offering_type: str
+
+        :param product_description: The Reserved Instance product platform description.
+            Instances that include (Amazon VPC) in the description are for use with Amazon VPC.
+            (Default: None)
+        :type product_description: str
+
+        :param dry_run: Checks whether you have the required permissions for the action,
+            without actually making the request, and provides an error response.
+            If you have the required permissions, the error response is DryRunOperation.
+            Otherwise, it is UnauthorizedOperation.
+        :type dry_run: bool
 
         :param filters: dict with request filter. Those values will be translated into Filter.N
           format. Available keys: ['availability-zone', 'duration', 'fixed-price', 'instance-type',
@@ -4519,41 +4588,42 @@ class BaseEC2NodeDriver(NodeDriver):
         :param ids: list with reserved instances offerings IDs.
         :type ids: list
 
-        :param limit: limit the number of offerings. If None or 0 - do not limit the result.
-        :type limit: int
-
         :return: list of ``EC2ReservedInstanceOffering``.
         :rtype: list
         """
-        req_params = {'Action': 'DescribeReservedInstancesOfferings'}
+        params = {'Action': 'DescribeReservedInstancesOfferings',
+                  'IncludeMarketplace': include_marketplace or False,
+                  'InstanceTenancy': instance_tenancy or 'default',
+                  'MaxDuration': max_duration or 94608000,
+                  'MaxInstanceCount': max_instance_count or 20,
+                  'MinDuration': min_duration or 2592000,
+                  'DryRun': dry_run or False}
 
         if ids:
-            req_params.update(self._pathlist('ReservedInstancesOfferingId', ids))
+            params.update(self._pathlist('ReservedInstancesOfferingId', ids))
 
         if filters:
-            req_params.update(self._build_filters(filters))
+            params.update(self._build_filters(filters))
 
-        if params:
-            req_params.update(params)
+        if availability_zone:
+            params['AvailabilityZone'] = availability_zone
+        if instance_type:
+            params['InstanceType'] = instance_type
+        if offering_type:
+            params['OfferingType'] = offering_type
+        if offering_class:
+            params['OfferingClass'] = offering_class
+        if product_description:
+            params['ProductDescription'] = product_description
 
-        ri_offerings = []
-        for offerings in self._ex_iterate_reserved_instances_offerings(req_params):
-            ri_offerings.extend(offerings)
+        offerings_paginator = EC2PageList(
+            self.connection.request,
+            [self.path],
+            {'params': params},
+            page_size=max_results,
+            process_fn=lambda response: self._to_reserved_instances_offerings(response.object))
 
-            if limit and len(ri_offerings) >= limit:
-                ri_offerings = ri_offerings[:limit]
-                break
-
-        return ri_offerings
-
-    def _ex_iterate_reserved_instances_offerings(self, params):
-        next_page_token = ''
-
-        while next_page_token is not None:
-            response = self.connection.request(self.path, params=params).object
-            next_page_token = findtext(response, xpath='nextToken', namespace=NAMESPACE) or None
-            yield self._to_reserved_instances_offerings(response)
-            params['NextToken'] = next_page_token
+        return offerings_paginator
 
     def _to_reserved_instances_offerings(self, response):
         return [self._to_reserved_instance_offering(el) for el in response.findall(
@@ -4599,7 +4669,8 @@ class BaseEC2NodeDriver(NodeDriver):
             Otherwise, it is UnauthorizedOperation.
         :type dry_run: bool
 
-        :return: dict with 'request_id' and 'reserved_instance_id' in case of successful operation.
+        :raise BaseHTTPError if request was unsuccessful.
+        :return: dict with 'request_id' and 'reserved_instance_id'.
         """
         params = {'Action': 'PurchaseReservedInstancesOffering',
                   'ReservedInstancesOfferingId': offering_id,
