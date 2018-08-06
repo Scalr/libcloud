@@ -4498,19 +4498,9 @@ class BaseEC2NodeDriver(NodeDriver):
         response = self.connection.request(self.path, params=params).object
         return self._get_boolean(response)
 
-    def ex_describe_reserved_instances_offerings(self, *args, limit=None, **kwargs):
-        """Describes Reserved Instance offerings that are available for purchase.
-
-        :param limit: limit the number of offerings. If None or 0 - do not limit the result.
-        :type limit: int
-        """
-        offerings = []
-
-        for offering in self.ex_iterate_reserved_instances_offerings(*args, **kwargs):
-            offerings.append(offering)
-            if limit and len(offerings) >= limit:
-                break
-        return offerings
+    def ex_describe_reserved_instances_offerings(self, *args, **kwargs):
+        """Describes Reserved Instance offerings that are available for purchase."""
+        return list(self.ex_iterate_reserved_instances_offerings(*args, **kwargs))
 
     def ex_iterate_reserved_instances_offerings(self, availability_zone=None,
                                                 include_marketplace=None,
@@ -4528,12 +4518,11 @@ class BaseEC2NodeDriver(NodeDriver):
         :type availability_zone: str
 
         :param include_marketplace: Include Reserved Instance Marketplace offerings in the response.
-            (Default: False)
         :type include_marketplace: bool
 
         :param instance_tenancy: The tenancy of the instances covered by the reservation.
             A Reserved Instance with a tenancy of dedicated is applied to instances that run in
-            a VPC on single-tenant hardware (i.e., Dedicated Instances). (Default: 'default')
+            a VPC on single-tenant hardware (i.e., Dedicated Instances). (AWS default: 'default')
         :type instance_tenancy: str
 
         :param instance_type: The instance type that the reservation will cover
@@ -4542,20 +4531,20 @@ class BaseEC2NodeDriver(NodeDriver):
         :type instance_type: str
 
         :param max_duration: The maximum duration (in seconds) to filter when searching
-            for offerings. (Default: 94608000)
+            for offerings. (AWS default: 94608000)
         :type max_duration: int
 
         :param max_instance_count: The maximum number of instances to filter when searching
-        for offerings. (Default: 20)
+        for offerings. (AWS default: 20)
         :type max_instance_count: int
 
         :param max_results: The maximum number of results to return for the request in a
             single page. The remaining results of the initial request can be seen by sending
-            another request with the returned NextToken value. The maximum is 100. (Default: 100)
+            another request with the returned NextToken value. The maximum is 100.(AWS default: 100)
         :type max_results: int
 
         :param min_duration: The minimum duration (in seconds) to filter when searching
-        for offerings. (Default: 2592000 (1 month))
+        for offerings. (AWS default: 2592000 (1 month))
         :type min_duration: int
 
         :param offering_class: The offering class of the Reserved Instance. Can be standard
@@ -4570,7 +4559,6 @@ class BaseEC2NodeDriver(NodeDriver):
 
         :param product_description: The Reserved Instance product platform description.
             Instances that include (Amazon VPC) in the description are for use with Amazon VPC.
-            (Default: None)
         :type product_description: str
 
         :param dry_run: Checks whether you have the required permissions for the action,
@@ -4588,16 +4576,10 @@ class BaseEC2NodeDriver(NodeDriver):
         :param ids: list with reserved instances offerings IDs.
         :type ids: list
 
-        :return: list of ``EC2ReservedInstanceOffering``.
-        :rtype: list
+        :return: generator with ``EC2ReservedInstanceOffering`` instances.
+        :rtype: :class:`EC2PageList`
         """
-        params = {'Action': 'DescribeReservedInstancesOfferings',
-                  'IncludeMarketplace': include_marketplace or False,
-                  'InstanceTenancy': instance_tenancy or 'default',
-                  'MaxDuration': max_duration or 94608000,
-                  'MaxInstanceCount': max_instance_count or 20,
-                  'MinDuration': min_duration or 2592000,
-                  'DryRun': dry_run or False}
+        params = {'Action': 'DescribeReservedInstancesOfferings'}
 
         if ids:
             params.update(self._pathlist('ReservedInstancesOfferingId', ids))
@@ -4605,16 +4587,21 @@ class BaseEC2NodeDriver(NodeDriver):
         if filters:
             params.update(self._build_filters(filters))
 
-        if availability_zone:
-            params['AvailabilityZone'] = availability_zone
-        if instance_type:
-            params['InstanceType'] = instance_type
-        if offering_type:
-            params['OfferingType'] = offering_type
-        if offering_class:
-            params['OfferingClass'] = offering_class
-        if product_description:
-            params['ProductDescription'] = product_description
+        def set_if_not_none(name, value):
+            if value is not None:
+                params[name] = value
+
+        set_if_not_none('AvailabilityZone', availability_zone)
+        set_if_not_none('InstanceType', instance_type)
+        set_if_not_none('OfferingType', offering_type)
+        set_if_not_none('OfferingClass', offering_class)
+        set_if_not_none('ProductDescription', product_description)
+        set_if_not_none('IncludeMarketplace', include_marketplace)
+        set_if_not_none('InstanceTenancy', instance_tenancy)
+        set_if_not_none('MaxDuration', max_duration)
+        set_if_not_none('MaxInstanceCount', max_instance_count)
+        set_if_not_none('MinDuration', min_duration)
+        set_if_not_none('DryRun', dry_run)
 
         offerings_paginator = EC2PageList(
             self.connection.request,
