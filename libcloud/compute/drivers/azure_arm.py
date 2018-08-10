@@ -1361,7 +1361,38 @@ class AzureNodeDriver(NodeDriver):
             parsed_url = six.moves.urllib.parse.urlparse(next_link)
             params = six.moves.urllib.parse.parse_qs(parsed_url.query)
 
-    def ex_get_active_billing_period(self, api_version='2017-04-24-preview'):
+    def ex_iterate_usage_details(self, billing_period_name, api_version='2018-06-30'):
+        """Iterates usage details for a scope by billing period.
+
+        :param str billing_period_name: billing period name
+        :type billing_period_name: str
+
+        :param api_version: api version
+        :type api_version: str
+
+        :return: 1000 usage records per request (Azure limit)
+        :rtype: typing.Iterator[typing.Dict]
+        """
+        params = {
+            'api-version': api_version,
+            '$expand': 'meterDetails,additionalProperties'
+        }
+        action = '/subscriptions/%s/providers/Microsoft.Billing/billingPeriods/%s' \
+                 '/providers/Microsoft.Consumption/usageDetails' % (self.subscription_id, billing_period_name)
+
+        while True:
+            r = self.connection.request(action, params=params)
+
+            yield r.object
+
+            next_link = r.object.get('nextLink')
+            if not next_link:
+                break
+
+            parsed_url = six.moves.urllib.parse.urlparse(next_link)
+            params = six.moves.urllib.parse.parse_qs(parsed_url.query)
+
+    def ex_list_billing_periods(self, api_version='2017-04-24-preview'):
         """Get subscription active billing period
 
         :param str api_version: api version
@@ -1372,7 +1403,6 @@ class AzureNodeDriver(NodeDriver):
 
         params = {
             'api-version': api_version,
-            '$top': 1
         }
         r = self.connection.request(action, params=params)
         return r.object
