@@ -1361,11 +1361,14 @@ class AzureNodeDriver(NodeDriver):
             parsed_url = six.moves.urllib.parse.urlparse(next_link)
             params = six.moves.urllib.parse.parse_qs(parsed_url.query)
 
-    def ex_iterate_usage_details(self, billing_period_name, api_version='2018-06-30'):
-        """Iterates usage details for a scope by billing period.
+    def ex_iterate_usage_details(self, usage_start_date, usage_end_date, api_version='2018-06-30'):
+        """Iterates usage details for provided date range
 
-        :param str billing_period_name: billing period name
-        :type billing_period_name: str
+        :param datetime.datetime usage_start_date: usage start date
+        :type usage_start_date: datetime.datetime
+
+        :param datetime.datetime usage_end_date: usage end date
+        :type usage_end_date: datetime.datetime
 
         :param api_version: api version
         :type api_version: str
@@ -1373,12 +1376,15 @@ class AzureNodeDriver(NodeDriver):
         :return: 1000 usage records per request (Azure limit)
         :rtype: typing.Iterator[typing.Dict]
         """
+
+        filter_params = (usage_start_date.strftime("%Y-%m-%d"), usage_end_date.strftime("%Y-%m-%d"))
+        filter_str = "properties/usageStart ge '%s' AND properties/usageEnd lt '%s'" % filter_params
         params = {
             'api-version': api_version,
-            '$expand': 'meterDetails,additionalProperties'
+            '$expand': 'meterDetails,additionalProperties',
+            '$filter': filter_str
         }
-        action = '/subscriptions/%s/providers/Microsoft.Billing/billingPeriods/%s' \
-                 '/providers/Microsoft.Consumption/usageDetails' % (self.subscription_id, billing_period_name)
+        action = '/subscriptions/%s/providers/Microsoft.Consumption/usageDetails' % self.subscription_id
 
         while True:
             r = self.connection.request(action, params=params)
@@ -1392,7 +1398,7 @@ class AzureNodeDriver(NodeDriver):
             parsed_url = six.moves.urllib.parse.urlparse(next_link)
             params = six.moves.urllib.parse.parse_qs(parsed_url.query)
 
-    def ex_list_billing_periods(self, api_version='2017-04-24-preview'):
+    def ex_get_active_billing_period(self, api_version='2017-04-24-preview'):
         """Get subscription active billing period
 
         :param str api_version: api version
@@ -1403,6 +1409,7 @@ class AzureNodeDriver(NodeDriver):
 
         params = {
             'api-version': api_version,
+            '$top': 1
         }
         r = self.connection.request(action, params=params)
         return r.object
