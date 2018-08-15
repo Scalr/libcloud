@@ -25,8 +25,8 @@ import copy
 import warnings
 import time
 
+from libcloud.utils import misc as misc_utils
 from libcloud.utils.py3 import b, basestring, ensure_string
-
 from libcloud.utils.xml import fixxpath, findtext, findattr, findall
 from libcloud.utils.publickey import get_pubkey_ssh2_fingerprint
 from libcloud.utils.publickey import get_pubkey_comment
@@ -303,6 +303,66 @@ INSTANCE_TYPES = {
             'cpu': 64
         }
     },
+    'm5.large': {
+        'id': 'm5.large',
+        'name': 'Large Instance',
+        'ram': GiB(8),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    'm5.xlarge': {
+        'id': 'm5.xlarge',
+        'name': 'Extra Large Instance',
+        'ram': GiB(16),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 4
+        }
+    },
+    'm5.2xlarge': {
+        'id': 'm5.2xlarge',
+        'name': 'Double Extra Large Instance',
+        'ram': GiB(32),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 8
+        }
+    },
+    'm5.4xlarge': {
+        'id': 'm5.4xlarge',
+        'name': 'Quadruple Extra Large Instance',
+        'ram': GiB(64),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 16
+        }
+    },
+    'm5.12xlarge': {
+        'id': 'm5.12xlarge',
+        'name': '12 Extra Large Instance',
+        'ram': GiB(192),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 48
+        }
+    },
+    'm5.24xlarge': {
+        'id': 'm5.24xlarge',
+        'name': '24 Extra Large Instance',
+        'ram': GiB(384),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 96
+        }
+    },
     'cg1.4xlarge': {
         'id': 'cg1.4xlarge',
         'name': 'Cluster GPU Quadruple Extra Large Instance',
@@ -506,6 +566,66 @@ INSTANCE_TYPES = {
         'bandwidth': None,
         'extra': {
             'cpu': 32
+        }
+    },
+    'c5.large': {
+        'id': 'c5.large',
+        'name': 'Compute Optimized Large Instance',
+        'ram': GiB(4),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    'c5.xlarge': {
+        'id': 'c5.xlarge',
+        'name': 'Compute Optimized Extra Large Instance',
+        'ram': GiB(8),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 4
+        }
+    },
+    'c5.2xlarge': {
+        'id': 'c5.2xlarge',
+        'name': 'Compute Optimized Double Extra Large Instance',
+        'ram': GiB(16),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 8
+        }
+    },
+    'c5.4xlarge': {
+        'id': 'c5.4xlarge',
+        'name': 'Compute Optimized Quadruple Extra Large Instance',
+        'ram': GiB(32),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 16
+        }
+    },
+    'c5.9xlarge': {
+        'id': 'c5.9xlarge',
+        'name': 'Compute Optimized Nonuple Extra Large Instance',
+        'ram': GiB(72),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 36
+        }
+    },
+    'c5.18xlarge': {
+        'id': 'c5.18xlarge',
+        'name': 'Compute Optimized Eighteen Extra Large Instance',
+        'ram': GiB(144),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 72
         }
     },
     'cr1.8xlarge': {
@@ -920,6 +1040,12 @@ REGION_DETAILS = {
             'm4.4xlarge',
             'm4.10xlarge',
             'm4.16xlarge',
+            'm5.large',
+            'm5.xlarge',
+            'm5.2xlarge',
+            'm5.4xlarge',
+            'm5.12xlarge',
+            'm5.24xlarge',
             'c1.medium',
             'c1.xlarge',
             'cc2.8xlarge',
@@ -933,6 +1059,12 @@ REGION_DETAILS = {
             'c4.2xlarge',
             'c4.4xlarge',
             'c4.8xlarge',
+            'c5.large',
+            'c5.xlarge',
+            'c5.2xlarge',
+            'c5.4xlarge',
+            'c5.9xlarge',
+            'c5.18xlarge',
             'cg1.4xlarge',
             'g2.2xlarge',
             'g2.8xlarge',
@@ -1018,6 +1150,12 @@ REGION_DETAILS = {
             'c4.2xlarge',
             'c4.4xlarge',
             'c4.8xlarge',
+            'c5.large',
+            'c5.xlarge',
+            'c5.2xlarge',
+            'c5.4xlarge',
+            'c5.9xlarge',
+            'c5.18xlarge',
             'i2.xlarge',
             'i2.2xlarge',
             'i2.4xlarge',
@@ -1152,6 +1290,12 @@ REGION_DETAILS = {
             'm4.4xlarge',
             'm4.10xlarge',
             'm4.16xlarge',
+            'm5.large',
+            'm5.xlarge',
+            'm5.2xlarge',
+            'm5.4xlarge',
+            'm5.12xlarge',
+            'm5.24xlarge',
             'c1.medium',
             'c1.xlarge',
             'g2.2xlarge',
@@ -1234,6 +1378,12 @@ REGION_DETAILS = {
             'm4.4xlarge',
             'm4.10xlarge',
             'm4.16xlarge',
+            'm5.large',
+            'm5.xlarge',
+            'm5.2xlarge',
+            'm5.4xlarge',
+            'm5.12xlarge',
+            'm5.24xlarge',
             'c1.medium',
             'c1.xlarge',
             'g2.2xlarge',
@@ -1251,6 +1401,12 @@ REGION_DETAILS = {
             'c4.2xlarge',
             'c4.4xlarge',
             'c4.8xlarge',
+            'c5.large',
+            'c5.xlarge',
+            'c5.2xlarge',
+            'c5.4xlarge',
+            'c5.9xlarge',
+            'c5.18xlarge',
             'hs1.8xlarge',
             'cc2.8xlarge',
             'i2.xlarge',
@@ -1422,6 +1578,51 @@ REGION_DETAILS = {
             't2.medium',
             't2.large',
             'x1.32xlarge'
+        ]
+    },
+    # EU (Paris) Region
+    'eu-west-3': {
+        'endpoint': 'ec2.eu-west-3.amazonaws.com',
+        'api_name': 'ec2_eu_west_paris',
+        'country': 'France',
+        'signature_version': '4',
+        'instance_types': [
+            'c5.large',
+            'c5.xlarge',
+            'c5.2xlarge',
+            'c5.4xlarge',
+            'c5.9xlarge',
+            'c5.18xlarge',
+            'm5.large',
+            'm5.xlarge',
+            'm5.2xlarge',
+            'm5.4xlarge',
+            'm5.12xlarge',
+            'm5.24xlarge',
+            'r4.large',
+            'r4.xlarge',
+            'r4.2xlarge',
+            'r4.4xlarge',
+            'r4.8xlarge',
+            'r4.16xlarge',
+            't2.nano',
+            't2.micro',
+            't2.small',
+            't2.medium',
+            't2.large',
+            'd2.xlarge',
+            'd2.2xlarge',
+            'd2.4xlarge',
+            'd2.8xlarge',
+            'i3.large',
+            'i3.xlarge',
+            'i3.2xlarge',
+            'i3.4xlarge',
+            'i3.8xlarge',
+            'i3.16xlarge',
+            'x1.16xlarge',
+            'x1.32xlarge',
+            'x1e.32xlarge',
         ]
     },
     # EU (Frankfurt) Region
@@ -3565,6 +3766,25 @@ class EC2VolumeModification(object):
                    self.volume_id))
 
 
+DEFAULT_PAGE_SIZE = 1000
+
+
+class EC2PageList(misc_utils.PageList):
+    page_token_name = 'NextToken'
+    page_size_name = 'MaxResults'
+
+    def update_request_kwds(self):
+        if self.next_page_token:
+            self.request_kwargs['params'][self.page_token_name] = self.next_page_token
+        if self.page_size:
+            self.request_kwargs['params'][self.page_size_name] = self.page_size
+
+    def extract_next_page_token(self, response):
+        if response:
+            return findtext(element=response.object, xpath='nextToken',
+                            namespace=NAMESPACE)
+
+
 class BaseEC2NodeDriver(NodeDriver):
     """
     Base Amazon EC2 node driver.
@@ -3601,7 +3821,12 @@ class BaseEC2NodeDriver(NodeDriver):
         'error': VolumeSnapshotState.ERROR,
     }
 
-    def list_nodes(self, ex_node_ids=None, ex_filters=None):
+    def list_nodes(self, *args, **kwargs):
+        kwargs.setdefault('ex_page_size', None)
+        return list(self.iterate_nodes(*args, **kwargs))
+
+    def iterate_nodes(self, ex_node_ids=None, ex_filters=None,
+                      ex_page_size=DEFAULT_PAGE_SIZE):
         """
         Lists all nodes.
 
@@ -3616,6 +3841,10 @@ class BaseEC2NodeDriver(NodeDriver):
                                 information for certain nodes only.
         :type       ex_filters: ``dict``
 
+        :param      ex_page_size: The filters so that the list includes
+                                information for certain nodes only.
+        :type       ex_page_size: ``int``
+
         :rtype: ``list`` of :class:`Node`
         """
 
@@ -3627,20 +3856,27 @@ class BaseEC2NodeDriver(NodeDriver):
         if ex_filters:
             params.update(self._build_filters(ex_filters))
 
-        elem = self.connection.request(self.path, params=params).object
+        def split_to_nodes(response):
+            nodes = []
+            for rs in findall(response.object, xpath='reservationSet/item',
+                              namespace=NAMESPACE):
+                nodes += self._to_nodes(rs, 'instancesSet/item')
 
-        nodes = []
-        for rs in findall(element=elem, xpath='reservationSet/item',
-                          namespace=NAMESPACE):
-            nodes += self._to_nodes(rs, 'instancesSet/item')
+            nodes_elastic_ips_mappings = self.ex_describe_addresses(nodes)
+            for node in nodes:
+                ips = nodes_elastic_ips_mappings[node.id]
+                node.public_ips.extend(ips)
 
-        nodes_elastic_ips_mappings = self.ex_describe_addresses(nodes)
+            return nodes
 
-        for node in nodes:
-            ips = nodes_elastic_ips_mappings[node.id]
-            node.public_ips.extend(ips)
+        node_paginator = EC2PageList(
+            self.connection.request,
+            (self.path,),
+            {'params': params},
+            page_size=ex_page_size,
+            process_fn=split_to_nodes)
 
-        return nodes
+        return node_paginator
 
     def list_sizes(self, location=None):
         available_types = REGION_DETAILS[self.region_name]['instance_types']
@@ -3745,7 +3981,12 @@ class BaseEC2NodeDriver(NodeDriver):
                     )
         return locations
 
-    def list_volumes(self, node=None, ex_volume_ids=None):
+    def list_volumes(self, *args, **kwargs):
+        kwargs.setdefault('ex_page_size', None)
+        return list(self.iterate_volumes(*args, **kwargs))
+
+    def iterate_volumes(self, node=None, ex_volume_ids=None,
+                        ex_page_size=DEFAULT_PAGE_SIZE):
         params = {
             'Action': 'DescribeVolumes',
         }
@@ -3756,11 +3997,18 @@ class BaseEC2NodeDriver(NodeDriver):
         if ex_volume_ids:
             params.update(self._pathlist('VolumeId', ex_volume_ids))
 
-        response = self.connection.request(self.path, params=params).object
-        volumes = [self._to_volume(el) for el in response.findall(
-            fixxpath(xpath='volumeSet/item', namespace=NAMESPACE))
-        ]
-        return volumes
+        def split_to_volumes(response):
+            return [self._to_volume(el) for el in response.object.findall(
+                    fixxpath(xpath='volumeSet/item', namespace=NAMESPACE))]
+
+        volume_paginator = EC2PageList(
+            self.connection.request,
+            (self.path,),
+            {'params': params},
+            page_size=ex_page_size,
+            process_fn=split_to_volumes)
+
+        return volume_paginator
 
     def create_node(self, **kwargs):
         """
@@ -4139,7 +4387,12 @@ class BaseEC2NodeDriver(NodeDriver):
         return [snapshot for snapshot in self.list_snapshots(owner='self')
                 if snapshot.extra["volume_id"] == volume.id]
 
-    def list_snapshots(self, snapshot=None, owner=None):
+    def list_snapshots(self, *args, **kwargs):
+        kwargs.setdefault('ex_page_size', None)
+        return list(self.iterate_snapshots(*args, **kwargs))
+
+    def iterate_snapshots(self, snapshot=None, owner=None,
+                          ex_page_size=DEFAULT_PAGE_SIZE):
         """
         Describes all snapshots.
 
@@ -4162,9 +4415,15 @@ class BaseEC2NodeDriver(NodeDriver):
             params.update({
                 'Owner.1': owner,
             })
-        response = self.connection.request(self.path, params=params).object
-        snapshots = self._to_snapshots(response)
-        return snapshots
+
+        snapshot_paginator = EC2PageList(
+            self.connection.request,
+            (self.path,),
+            {'params': params},
+            page_size=ex_page_size,
+            process_fn=lambda response: self._to_snapshots(response.object))
+
+        return snapshot_paginator
 
     def destroy_volume_snapshot(self, snapshot):
         params = {
