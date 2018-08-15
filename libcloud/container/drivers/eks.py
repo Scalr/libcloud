@@ -3,6 +3,7 @@ import base64
 from libcloud.common.aws import SignedAWSConnection, AWSJsonResponse
 from libcloud.container.base import ContainerDriver, ContainerCluster
 from libcloud.container.types import ClusterState
+from libcloud.utils import misc as misc_utils
 
 __all__ = [
     'ElasticKubernetesDriver'
@@ -57,6 +58,19 @@ class EKSJsonConnection(SignedAWSConnection):
     service_name = 'eks'
 
 
+class EKSPageList(misc_utils.PageList):
+    page_token_name = 'nextToken'
+    page_size_name = 'maxResults'
+
+    def extract_next_page_token(self, response):
+        if response:
+            return response.object[self.page_token_name]
+
+    def update_request_kwds(self):
+        if self.next_page_token:
+            self.request_kwargs.update({'params': {self.page_token_name: self.next_page_token}})
+
+
 class ElasticKubernetesDriver(ContainerDriver):
 
     name = 'Amazon EKS'
@@ -77,12 +91,14 @@ class ElasticKubernetesDriver(ContainerDriver):
 
         :rtype: ``list`` of :class:`str`
         """
-        data = self.connection.request(
-            'clusters',
-            method='GET',
-        ).object
 
-        return data['clusters']
+        paginator = EKSPageList(
+            self.connection.request,
+            ['clusters'],
+            {'method': 'GET'},
+            process_fn=lambda response: response.object['clusters'])
+
+        return list(paginator)
 
     def destroy_cluster(self, cluster):
         """Delete a cluster.
