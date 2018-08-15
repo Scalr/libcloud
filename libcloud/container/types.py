@@ -95,6 +95,6 @@ class ClusterState(Type):
     :cvar DELETING : Cluster is terminating.
                 This container can't be started later on.
     """
-    CREATING = 'CREATING'
-    ACTIVE = 'ACTIVE'
-    DELETING = 'DELETING'
+    CREATING = 'creating'
+    ACTIVE = 'active'
+    DELETING = 'deleting'

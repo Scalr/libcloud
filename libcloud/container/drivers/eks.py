@@ -33,26 +33,28 @@ class EKSCluster(object):
         self.status = self.states_map.get(cluster_data['status'])
         self.resources_vpc_config = cluster_data['resourcesVpcConfig']
 
-        cert = base64.b64decode(cluster_data['certificateAuthority']['data'].encode()).decode()
-        self.cluster_certificate = cert
+        decoded_cert = cluster_data['certificateAuthority']['data']
+        certificate = base64.b64decode(decoded_cert.encode()).decode() if decoded_cert else None
+        self.cluster_certificate = certificate
 
     def __repr__(self):
         return '<EKSCluster: name={}, endpoint={}, version={}, status={}>'.format(
             self.name, self.endpoint, self.version, self.status
         )
 
+
 class EKSJsonConnection(SignedAWSConnection):
+
     version = EKS_VERSION
-    host = EKS_HOST
     responseCls = AWSJsonResponse
     service_name = 'eks'
 
 
 class ElasticKubernetesDriver(ContainerDriver):
+
     name = 'Amazon EKS'
     website = 'https://aws.amazon.com/eks/'
     connectionCls = EKSJsonConnection
-
 
     def __init__(self, access_id, secret, region):
         super(ElasticKubernetesDriver, self).__init__(access_id, secret, host=EKS_HOST % region)
@@ -62,9 +64,9 @@ class ElasticKubernetesDriver(ContainerDriver):
     def _ex_connection_class_kwargs(self):
         return {'signature_version': '4'}
 
-    def list_clusters(self):
+    def ex_list_cluster_names(self):
         """
-        List the Amazon EKS clusters in your AWS account in the specified region.
+        List Amazon EKS clusters.
 
         :rtype: ``list`` of :class:`str`
         """
@@ -87,7 +89,8 @@ class ElasticKubernetesDriver(ContainerDriver):
             'clusters/{}'.format(cluster),
             method='DELETE',
         ).object
-        return EKSCluster(self, data['cluster'])
+        cluster = EKSCluster(self, data['cluster'])
+        return cluster.status == ClusterState.DELETING
 
     def ex_describe_cluster(self, name):
         """
