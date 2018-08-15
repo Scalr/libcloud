@@ -1,7 +1,7 @@
 import base64
 
 from libcloud.common.aws import SignedAWSConnection, AWSJsonResponse
-from libcloud.container.base import ContainerDriver
+from libcloud.container.base import ContainerDriver, ContainerCluster
 from libcloud.container.types import ClusterState
 
 __all__ = [
@@ -12,7 +12,7 @@ EKS_VERSION = '2017-11-01'
 EKS_HOST = 'eks.%s.amazonaws.com'
 
 
-class EKSCluster(object):
+class EKSCluster(ContainerCluster):
     """EKS cluster."""
 
     states_map = {
@@ -36,6 +36,13 @@ class EKSCluster(object):
         decoded_cert = cluster_data['certificateAuthority']['data']
         certificate = base64.b64decode(decoded_cert.encode()).decode() if decoded_cert else None
         self.cluster_certificate = certificate
+        super().__init__(cluster_data['arn'], cluster_data['name'], driver, cluster_data)
+
+    def list_containers(self):
+        raise NotImplementedError('EKS cluster can\'t list containers.')
+
+    def destroy(self):
+        self.driver.destroy_cluster(self.name)
 
     def __repr__(self):
         return '<EKSCluster: name={}, endpoint={}, version={}, status={}>'.format(
