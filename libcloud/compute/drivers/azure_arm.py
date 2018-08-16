@@ -267,15 +267,17 @@ class AzureNodeDriver(NodeDriver):
         return [self._to_node_size(d) for d in r.object["value"]]
 
     def _to_image(self, data):
+        extra = dict(data)
+
+        if extra.get('location'):
+            extra['location'] = self._to_location(extra['location']).id
+        extra.setdefault('tags', {})
+
         return NodeImage(
             id=data['id'],
             name=data['name'],
             driver=self,
-            extra={
-                'properties': data['properties'],
-                'type': data['type'],
-                'tags': data.get('tags', {})
-            })
+            extra=extra)
 
     def list_images(self, *args, **kwargs):
         return list(self.iterate_images(*args, **kwargs))
@@ -1197,6 +1199,9 @@ class AzureNodeDriver(NodeDriver):
                 name is not None:
             volume_name = name
 
+        if extra.get('location'):
+            extra['location'] = self._to_location(extra['location']).id
+
         return StorageVolume(
             id=volume_id,
             name=volume_name,
@@ -1252,6 +1257,9 @@ class AzureNodeDriver(NodeDriver):
                 resource_group=ex_resource_group,
                 snapshot_name=name
             )
+
+        if extra.get('location'):
+            extra['location'] = self._to_location(extra['location']).id
 
         return VolumeSnapshot(
             snapshot_id,
@@ -2163,6 +2171,9 @@ class AzureNodeDriver(NodeDriver):
                 state = NodeState.UPDATING
             elif ps == "succeeded":
                 state = NodeState.RUNNING
+
+        if data.get('location'):
+            data['location'] = self._to_location(data['location']).id
 
         node = Node(data["id"],
                     data["name"],
