@@ -77,10 +77,10 @@ class ElasticKubernetesDriver(ContainerDriver):
     website = 'https://aws.amazon.com/eks/'
     connectionCls = EKSJsonConnection
 
-    def __init__(self, access_id, secret, region):
-        super(ElasticKubernetesDriver, self).__init__(access_id, secret, host=EKS_HOST % region)
-        self.region = region
-        self.region_name = region
+    def __init__(self, access_id, secret, region, **kwargs):
+        host = EKS_HOST % region
+        super(ElasticKubernetesDriver, self).__init__(access_id, secret, host=host, **kwargs)
+        self.region = self.region_name = region
 
     def _ex_connection_class_kwargs(self):
         return {'signature_version': '4'}
