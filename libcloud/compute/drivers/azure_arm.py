@@ -1393,14 +1393,27 @@ class AzureNodeDriver(NodeDriver):
         :rtype: typing.Iterator[typing.Dict]
         """
 
-        filter_params = (start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
-        filter_str = "properties/usageStart ge '%s' AND properties/usageEnd lt '%s'" % filter_params
+        filter_str = ""
         params = {
             'api-version': api_version,
             '$expand': 'meterDetails,additionalProperties',
-            '$filter': filter_str
         }
+
         action = '/subscriptions/%s/providers/Microsoft.Consumption/usageDetails' % self.subscription_id
+        if billing_period is not None:
+            action = '/subscriptions/%s/providers/Microsoft.Billing/billingPeriods/%s' \
+                     '/providers/Microsoft.Consumption/usageDetails' % (self.subscription_id, billing_period)
+
+        if start_date is not None:
+            filter_str = "properties/usageStart ge '%s'" % start_date.strftime("%Y-%m-%d")
+
+        if end_date is not None:
+            if filter_str:
+                filter_str += ' AND '
+            filter_str += "properties/usageEnd lt '%s'" % end_date.strftime("%Y-%m-%d")
+
+        if filter_str:
+            params['$filter'] = filter_str
 
         def _process_fn(response):
             return response.object['value']
