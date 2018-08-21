@@ -525,11 +525,13 @@ class VSphereNodeDriver(NodeDriver):
         def result_to_nodes(result):
             nodes = []
             for vm_entity, vm_properties in result.items():
-                if vm_properties['summary.config'].template is True:
+                if not vm_properties.get('summary.config') \
+                        or vm_properties['summary.config'].template is True:
                     continue
                 node = self._to_node(vm_entity, vm_properties)
-                node.created_at = creation_times.get(node.id)
-                nodes.append(node)
+                if node:
+                    node.created_at = creation_times.get(node.id)
+                    nodes.append(node)
             return nodes
 
         self._get_datacenter_urls_map.cache_clear()
@@ -575,12 +577,14 @@ class VSphereNodeDriver(NodeDriver):
         def result_to_images(result):
             images = []
             for vm_entity, vm_properties in result.items():
-                if vm_properties['summary.config'].template is False:
+                if not vm_properties.get('summary.config') \
+                        or vm_properties['summary.config'].template is False:
                     continue
                 image = self._to_image(vm_entity, vm_properties)
-                image.created_at = creation_times.get(
-                    image.extra['managed_object_id'])
-                images.append(image)
+                if image:
+                    image.created_at = creation_times.get(
+                        image.extra['managed_object_id'])
+                    images.append(image)
             return images
 
         self._get_datacenter_urls_map.cache_clear()
@@ -937,12 +941,12 @@ class VSphereNodeDriver(NodeDriver):
         :param begin_time: The beginning of the time range. If this property is
             not set, then events are collected from the earliest
             time in the database. (optional)
-        :type begin_time: :class:`datatime.datatime`
+        :type begin_time: :class:`datetime.datetime`
 
         :param end_time: The end of the time range. If this property is not
             specified, then events are collected up to the latest
             time in the database. (optional)
-        :type end_time: :class:`datatime.datatime`
+        :type end_time: :class:`datetime.datetime`
 
         :param userlist: This option specifies users used to filter event
             history. (optional)
@@ -1073,8 +1077,16 @@ class VSphereNodeDriver(NodeDriver):
         """
         if vm_properties is None:
             vm_properties = {}
-        datastore_url = vm_properties.get('config.datastoreUrl') \
-            or vm_entity.config.datastoreUrl
+        try:
+            datastore_url = vm_properties.get(
+                'config.datastoreUrl',
+                vm_entity.config.datastoreUrl)
+        except AttributeError:
+            # If there's no config and consequently datastoreUrl, it means
+            # the VM is still preparing, or is almost removed.
+            # In that case we don't need it.
+            return None
+
         summary = vm_properties.get('summary') or vm_entity.summary
         config = vm_properties.get('summary.config') or summary.config
         runtime = vm_properties.get('summary.runtime') or summary.runtime
@@ -1133,8 +1145,16 @@ class VSphereNodeDriver(NodeDriver):
         """
         if vm_properties is None:
             vm_properties = {}
-        datastore_url = vm_properties.get('config.datastoreUrl') \
-            or vm_entity.config.datastoreUrl
+        try:
+            datastore_url = vm_properties.get(
+                'config.datastoreUrl',
+                vm_entity.config.datastoreUrl)
+        except AttributeError:
+            # If there's no config and consequently datastoreUrl, it means
+            # the image is still preparing, or is almost removed.
+            # In that case we don't need it.
+            return None
+
         config = vm_properties.get('summary.config') or vm_entity.summary.config
 
         return NodeImage(
