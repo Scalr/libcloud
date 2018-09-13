@@ -20,6 +20,7 @@ import socket
 import copy
 import binascii
 import time
+import urllib
 
 from libcloud.utils.py3 import ET
 
@@ -585,13 +586,8 @@ class Connection(object):
             try:
                 self.connect()
             except Exception as e:
-                def get_proxy_password(url):
-                    if '@' in url:
-                        parts = url.split('@')[0].split(':')
-                        if len(parts) == 3:
-                            return parts[-1]
                 if self.proxy_url:
-                    proxy_pass = get_proxy_password(self.proxy_url)
+                    proxy_pass = urllib.parse.urlparse(self.proxy_url).password
                     proxy_url = self.proxy_url.replace(proxy_pass, '*' * 6) if proxy_pass \
                         else self.proxy_url
                     msg = 'Connection info: (url: {}:{}, proxy: {})'.format(self.host, self.port,
