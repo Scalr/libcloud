@@ -582,8 +582,23 @@ class Connection(object):
 
         # IF connection has not yet been established
         if self.connection is None:
-            self.connect()
-
+            try:
+                self.connect()
+            except Exception as e:
+                def get_proxy_password(url):
+                    if '@' in url:
+                        parts = url.split('@')[0].split(':')
+                        if len(parts) == 3:
+                            return parts[-1]
+                if self.proxy_url:
+                    proxy_pass = get_proxy_password(self.proxy_url)
+                    proxy_url = self.proxy_url.replace(proxy_pass, '*' * 6) if proxy_pass \
+                        else self.proxy_url
+                    msg = 'Connection info: (url: {}:{}, proxy: {})'.format(self.host, self.port,
+                                                                            proxy_url)
+                else:
+                    msg = 'Connection info: (url: {}:{})'.format(self.host, self.port)
+                raise type(e)('{}: {}'.format(str(e), msg)).with_traceback(sys.exc_info()[2])
         try:
             # @TODO: Should we just pass File object as body to request method
             # instead of dealing with splitting and sending the file ourselves?
