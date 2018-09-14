@@ -42,9 +42,9 @@ from libcloud.utils import misc as misc_utils
 from libcloud.utils.py3 import basestring
 from libcloud.utils import iso8601
 
-
 RESOURCE_API_VERSION = '2016-04-30-preview'
 NIC_API_VERSION = '2016-09-01'
+CONSUMPTION_API_VERSION = '2018-06-30'
 
 
 class AzureVhdImage(NodeImage):
@@ -160,7 +160,7 @@ class AzurePageList(misc_utils.PageList):
                 parsed_url.query)
 
     def extract_next_page_token(self, response):
-        return response.object.get('nextLink')
+        return response.object.get('nextLink') or None
 
 
 class AzureNodeDriver(NodeDriver):
@@ -1368,6 +1368,63 @@ class AzureNodeDriver(NodeDriver):
 
             parsed_url = six.moves.urllib.parse.urlparse(next_link)
             params = six.moves.urllib.parse.parse_qs(parsed_url.query)
+
+    def ex_iterate_usage_details(self,
+                                 billing_period=None,
+                                 start_date=None,
+                                 end_date=None,
+                                 api_version=CONSUMPTION_API_VERSION):
+        """Iterates usage details for provided date range, billing period,
+        or date range in context of billing period
+
+        :param str billing_period: usage start date
+        :type billing_period: str
+
+        :param datetime.datetime start_date: usage start date
+        :type start_date: datetime.datetime
+
+        :param datetime.datetime end_date: usage end date
+        :type end_date: datetime.datetime
+
+        :param api_version: api version
+        :type api_version: str
+
+        :return: 1000 usage records per request (Azure limit)
+        :rtype: typing.Iterator[typing.Dict]
+        """
+
+        filter_str = ""
+        params = {
+            'api-version': api_version,
+            '$expand': 'meterDetails,additionalProperties',
+        }
+
+        action = '/subscriptions/%s/providers/Microsoft.Consumption/usageDetails' % self.subscription_id
+        if billing_period is not None:
+            action = '/subscriptions/%s/providers/Microsoft.Billing/billingPeriods/%s' \
+                     '/providers/Microsoft.Consumption/usageDetails' % (self.subscription_id, billing_period)
+
+        if start_date is not None:
+            filter_str = "properties/usageStart ge '%s'" % start_date.strftime("%Y-%m-%d")
+
+        if end_date is not None:
+            if filter_str:
+                filter_str += ' AND '
+            filter_str += "properties/usageEnd lt '%s'" % end_date.strftime("%Y-%m-%d")
+
+        if filter_str:
+            params['$filter'] = filter_str
+
+        def _process_fn(response):
+            return response.object['value']
+
+        usage_paginator = AzurePageList(
+            self.connection.request,
+            (action,),
+            {'params': params},
+            process_fn=_process_fn)
+
+        return usage_paginator
 
     def ex_get_active_billing_period(self, api_version='2017-04-24-preview'):
         """Get subscription active billing period
