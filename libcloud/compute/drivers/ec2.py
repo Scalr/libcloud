@@ -3222,6 +3222,14 @@ RESOURCE_EXTRA_ATTRIBUTES_MAP = {
         'start_time': {
             'xpath': 'startTime',
             'transform_func': parse_date
+        },
+        'encrypted': {
+            'xpath': 'encrypted',
+            'transform_func': lambda x: {'true': True, 'false': False}.get(x)
+        },
+        'kms_key_id': {
+            'xpath': 'kmsKeyId',
+            'transform_func': str
         }
     },
     'subnet': {
