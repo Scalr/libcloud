@@ -105,11 +105,17 @@ class VSpherePropertyCollector(misc_utils.PageList):
         self._connection = driver.connection
         self._object_cls = object_cls
         self._path_set = path_set
+
         self._container = container
+        self._container_view = None
         self._collector = None
 
         def _process_fn(result):
             """Convert result to list|dict before processing."""
+            if result is None:
+                raise LibcloudError((
+                    "VSpherePropertyCollector cannot retrieve {} objects"
+                ).format(self._object_cls.__name__))
             if path_set is None:
                 result = [prop.obj for prop in result.objects]
             else:
@@ -151,7 +157,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
         :rtype: tulpe(:class:`vmodl.query.PropertyCollector`, tuple)
         """
         content = self._connection.client.RetrieveContent()
-        container_view = content.viewManager.CreateContainerView(
+        self._container_view = content.viewManager.CreateContainerView(
             container=self._container or content.rootFolder,
             type=[self._object_cls],
             recursive=True,
@@ -163,12 +169,12 @@ class VSpherePropertyCollector(misc_utils.PageList):
             name='traverseEntities',
             path='view',
             skip=False,
-            type=container_view.__class__)
+            type=self._container_view.__class__)
 
         # Create an object specification to define the starting point
         # for inventory navigation
         object_spec = vmodl.query.PropertyCollector.ObjectSpec(
-            obj=container_view,
+            obj=self._container_view,
             skip=True,
             selectSet=[traversal_spec])
 
@@ -188,6 +194,22 @@ class VSpherePropertyCollector(misc_utils.PageList):
             maxObjects=self.page_size)
 
         return content.propertyCollector, ([filter_spec], options)
+
+    def __iter__(self):
+        try:
+            for item in super(VSpherePropertyCollector, self).__iter__():
+                yield item
+        finally:
+            self.destroy()
+
+    def destroy(self):
+        """
+        Destroy property collector.
+        """
+        if self._container_view:
+            self._container_view.Destroy()
+            self._container_view = None
+        self._collector = None
 
 
 class VCenterFileSearch(misc_utils.PageList):
@@ -463,7 +485,12 @@ class VSphereConnection(ConnectionUserAndKey):
                 raise LibcloudError(
                     "Check that the vSphere host is accessible.")
 
-        atexit.register(connect.Disconnect, self.client)
+        atexit.register(self.disconnect)
+
+    def disconnect(self):
+        if self.client is not None:
+            connect.Disconnect(self.client)
+            self.client = None
 
 
 class VSphereNodeDriver(NodeDriver):
@@ -983,6 +1010,7 @@ class VSphereNodeDriver(NodeDriver):
             for event in events:
                 yield event
             events = history_collector.ReadPreviousEvents(page_size)
+        history_collector.DestroyCollector()
 
     def _query_vm_virtual_disks(self, virtual_machine=None):
         """
