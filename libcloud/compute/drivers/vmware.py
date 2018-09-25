@@ -437,8 +437,21 @@ class VSphereConnection(ConnectionUserAndKey):
     Note: Uses SOAP for communication.
     """
 
-    def __init__(self, user_id, key, secure=True,
-                 host=None, port=None, url=None, timeout=None, **kwargs):
+    def __init__(
+            self, user_id, key,
+            secure=True,
+            host=None,
+            port=None,
+            url=None,
+            timeout=None,
+            disconnect_on_terminate=True,
+            **kwargs):
+        """
+        :param disconnect_on_terminate: Closes connection automatically at the
+            process termination (via :mod:`atexit` callback). For long-running
+            processes, it is better to call the :meth:`disconnect` manually.
+        :param disconnect_on_terminate: bool, optional
+        """
         if host and url:
             raise ValueError('host and url arguments are mutually exclusive.')
         if not host and not url:
@@ -449,6 +462,8 @@ class VSphereConnection(ConnectionUserAndKey):
         if not host:
             raise ValueError('Either "host" or "url" argument must be '
                              'provided')
+
+        self._disconnect_on_terminate = disconnect_on_terminate
         self.client = None
         super(VSphereConnection, self).__init__(
             user_id=user_id,
@@ -473,6 +488,7 @@ class VSphereConnection(ConnectionUserAndKey):
 
         try:
             self.client = connect.SmartConnect(**kwargs)
+            connect.SetSi(None)  # removes connection object from the global scope
         except Exception as e:
             message = '{}'.format(e)
             if 'incorrect user name' in message:
@@ -485,7 +501,8 @@ class VSphereConnection(ConnectionUserAndKey):
                 raise LibcloudError(
                     "Check that the vSphere host is accessible.")
 
-        atexit.register(self.disconnect)
+        if self._disconnect_on_terminate:
+            atexit.register(self.disconnect)
 
     def disconnect(self):
         if self.client is not None:
@@ -509,8 +526,10 @@ class VSphereNodeDriver(NodeDriver):
     }
 
     def __init__(self, username, password, secure=True,
-                 host=None, port=None, url=None, timeout=None, **kwargs):
+                 host=None, port=None, url=None, timeout=None,
+                 disconnect_on_terminate=True, **kwargs):
         self.url = url
+        self._disconnect_on_terminate = disconnect_on_terminate
         super(VSphereNodeDriver, self).__init__(
             key=username, secret=password,
             secure=secure, host=host,
@@ -519,7 +538,8 @@ class VSphereNodeDriver(NodeDriver):
 
     def _ex_connection_class_kwargs(self):
         kwargs = {
-            'url': self.url
+            'url': self.url,
+            'disconnect_on_terminate': self._disconnect_on_terminate
         }
 
         return kwargs
