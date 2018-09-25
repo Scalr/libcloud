@@ -16,7 +16,6 @@
 """
 VMware vSphere driver using pyvmomi - https://github.com/vmware/pyvmomi
 """
-
 import atexit
 import collections
 import os
@@ -24,6 +23,7 @@ import re
 import ssl
 import time
 import functools
+import warnings
 from datetime import datetime
 from datetime import timedelta
 
@@ -204,11 +204,14 @@ class VSpherePropertyCollector(misc_utils.PageList):
 
     def destroy(self):
         """
-        Destroy property collector.
+        Destroy property collector resources.
         """
         if self._container_view:
-            self._container_view.Destroy()
-            self._container_view = None
+            try:
+                self._container_view.DestroyView()
+                self._container_view = None
+            except Exception as err:
+                warnings.warn(str(err))
         self._collector = None
 
 
@@ -691,7 +694,11 @@ class VSphereNodeDriver(NodeDriver):
             volumes = []
             for file_info in vmdk_files:
                 devices = virtual_disks.get(file_info.path) or []
-                volume = self._to_volume(file_info, devices=devices)
+                try:
+                    volume = self._to_volume(file_info, devices=devices)
+                except LibcloudError as err:
+                    warnings.warn(str(err))
+                    continue
 
                 created_at = volume_creation_times.get(volume.id)
                 for device in devices:
@@ -1030,7 +1037,12 @@ class VSphereNodeDriver(NodeDriver):
             for event in events:
                 yield event
             events = history_collector.ReadPreviousEvents(page_size)
-        history_collector.DestroyCollector()
+
+        try:
+            # try to delete EventHistoryCollector properly
+            history_collector.DestroyCollector()
+        except Exception as err:
+            warnings.warn(str(err))
 
     def _query_vm_virtual_disks(self, virtual_machine=None):
         """
@@ -1231,6 +1243,8 @@ class VSphereNodeDriver(NodeDriver):
         :type file_info: :class:`_FileInfo`.
         :param devices: The list of attached devices.
         :type devices: list[:class:`_VMDiskInfo`]
+
+        :raises: :class:`LibcloudError`
 
         :rtype: :class:`StorageVolume`
         """
