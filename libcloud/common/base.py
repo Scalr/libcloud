@@ -21,6 +21,7 @@ import copy
 import binascii
 import time
 import weakref
+import urllib
 
 from libcloud.utils.py3 import ET
 
@@ -583,8 +584,18 @@ class Connection(object):
 
         # IF connection has not yet been established
         if self.connection is None:
-            self.connect()
-
+            try:
+                self.connect()
+            except Exception as e:
+                if self.proxy_url:
+                    proxy_pass = urllib.parse.urlparse(self.proxy_url).password
+                    proxy_url = self.proxy_url.replace(proxy_pass, '*' * 6) if proxy_pass \
+                        else self.proxy_url
+                    msg = 'Connection info: (url: {}:{}, proxy: {})'.format(self.host, self.port,
+                                                                            proxy_url)
+                else:
+                    msg = 'Connection info: (url: {}:{})'.format(self.host, self.port)
+                raise type(e)('{}: {}'.format(str(e), msg)).with_traceback(sys.exc_info()[2])
         try:
             # @TODO: Should we just pass File object as body to request method
             # instead of dealing with splitting and sending the file ourselves?
