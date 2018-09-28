@@ -453,7 +453,7 @@ class VSphereConnection(ConnectionUserAndKey):
         :param disconnect_on_terminate: Closes connection automatically at the
             process termination (via :mod:`atexit` callback). For long-running
             processes, it is better to call the :meth:`disconnect` manually.
-        :param disconnect_on_terminate: bool, optional
+        :type disconnect_on_terminate: bool, optional
         """
         if host and url:
             raise ValueError('host and url arguments are mutually exclusive.')
@@ -697,6 +697,7 @@ class VSphereNodeDriver(NodeDriver):
                 try:
                     volume = self._to_volume(file_info, devices=devices)
                 except LibcloudError as err:
+                    # one broken volume should not break the whole iteration
                     warnings.warn(str(err))
                     continue
 
@@ -813,6 +814,8 @@ class VSphereNodeDriver(NodeDriver):
         Example URLs:
          - `/vmfs/volumes/599d9c57-a93b0b7a-ea4c-984be16496c6`
          - `ds:///vmfs/volumes/599d9c57-a93b0b7a-ea4c-984be16496c6/volume.vmdk`
+
+        :raise :class:`LibcloudError`: When volume URL format is invalid.
 
         :type url: str | :class:`vim.vm.ConfigInfo.DatastoreUrlPair` | list
         :rtype: str | None
@@ -1244,7 +1247,9 @@ class VSphereNodeDriver(NodeDriver):
         :param devices: The list of attached devices.
         :type devices: list[:class:`_VMDiskInfo`]
 
-        :raises: :class:`LibcloudError`
+        :raise :class:`LibcloudError`: When creating volume with multiple
+            non-shared devices.
+        :raise :class:`LibcloudError`: When volume URL format is invalid.
 
         :rtype: :class:`StorageVolume`
         """
