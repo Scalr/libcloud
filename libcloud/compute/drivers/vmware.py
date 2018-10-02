@@ -113,9 +113,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
         def _process_fn(result):
             """Convert result to list|dict before processing."""
             if result is None:
-                raise LibcloudError((
-                    "VSpherePropertyCollector cannot retrieve {} objects"
-                ).format(self._object_cls.__name__))
+                return []
             if path_set is None:
                 result = [prop.obj for prop in result.objects]
             else:
@@ -139,7 +137,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
         """
         :type response: :class:`vmodl.query.PropertyCollector.RetrieveResult`
         """
-        return response.token
+        return response.token if response else None
 
     def _retrieve_properties(self):
         if self.next_page_token is None:
