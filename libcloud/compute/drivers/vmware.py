@@ -503,6 +503,7 @@ class VSphereConnection(ConnectionUserAndKey):
             if 'name or service not known' in message:
                 raise LibcloudError(
                     "Check that the vSphere host is accessible.")
+            raise LibcloudError(message)
 
         if self._disconnect_on_terminate:
             atexit.register(self.disconnect)
