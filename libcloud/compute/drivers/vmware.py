@@ -16,7 +16,6 @@
 """
 VMware vSphere driver using pyvmomi - https://github.com/vmware/pyvmomi
 """
-
 import atexit
 import collections
 import os
@@ -24,6 +23,7 @@ import re
 import ssl
 import time
 import functools
+import warnings
 from datetime import datetime
 from datetime import timedelta
 
@@ -105,11 +105,15 @@ class VSpherePropertyCollector(misc_utils.PageList):
         self._connection = driver.connection
         self._object_cls = object_cls
         self._path_set = path_set
+
         self._container = container
+        self._container_view = None
         self._collector = None
 
         def _process_fn(result):
             """Convert result to list|dict before processing."""
+            if result is None:
+                return []
             if path_set is None:
                 result = [prop.obj for prop in result.objects]
             else:
@@ -133,7 +137,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
         """
         :type response: :class:`vmodl.query.PropertyCollector.RetrieveResult`
         """
-        return response.token
+        return response.token if response else None
 
     def _retrieve_properties(self):
         if self.next_page_token is None:
@@ -151,7 +155,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
         :rtype: tulpe(:class:`vmodl.query.PropertyCollector`, tuple)
         """
         content = self._connection.client.RetrieveContent()
-        container_view = content.viewManager.CreateContainerView(
+        self._container_view = content.viewManager.CreateContainerView(
             container=self._container or content.rootFolder,
             type=[self._object_cls],
             recursive=True,
@@ -163,12 +167,12 @@ class VSpherePropertyCollector(misc_utils.PageList):
             name='traverseEntities',
             path='view',
             skip=False,
-            type=container_view.__class__)
+            type=self._container_view.__class__)
 
         # Create an object specification to define the starting point
         # for inventory navigation
         object_spec = vmodl.query.PropertyCollector.ObjectSpec(
-            obj=container_view,
+            obj=self._container_view,
             skip=True,
             selectSet=[traversal_spec])
 
@@ -188,6 +192,25 @@ class VSpherePropertyCollector(misc_utils.PageList):
             maxObjects=self.page_size)
 
         return content.propertyCollector, ([filter_spec], options)
+
+    def __iter__(self):
+        try:
+            for item in super(VSpherePropertyCollector, self).__iter__():
+                yield item
+        finally:
+            self.destroy()
+
+    def destroy(self):
+        """
+        Destroy property collector resources.
+        """
+        if self._container_view:
+            try:
+                self._container_view.DestroyView()
+                self._container_view = None
+            except Exception as err:
+                warnings.warn(str(err))
+        self._collector = None
 
 
 class VCenterFileSearch(misc_utils.PageList):
@@ -415,8 +438,21 @@ class VSphereConnection(ConnectionUserAndKey):
     Note: Uses SOAP for communication.
     """
 
-    def __init__(self, user_id, key, secure=True,
-                 host=None, port=None, url=None, timeout=None, **kwargs):
+    def __init__(
+            self, user_id, key,
+            secure=True,
+            host=None,
+            port=None,
+            url=None,
+            timeout=None,
+            disconnect_on_terminate=True,
+            **kwargs):
+        """
+        :param disconnect_on_terminate: Closes connection automatically at the
+            process termination (via :mod:`atexit` callback). For long-running
+            processes, it is better to call the :meth:`disconnect` manually.
+        :type disconnect_on_terminate: bool, optional
+        """
         if host and url:
             raise ValueError('host and url arguments are mutually exclusive.')
         if not host and not url:
@@ -427,6 +463,8 @@ class VSphereConnection(ConnectionUserAndKey):
         if not host:
             raise ValueError('Either "host" or "url" argument must be '
                              'provided')
+
+        self._disconnect_on_terminate = disconnect_on_terminate
         self.client = None
         super(VSphereConnection, self).__init__(
             user_id=user_id,
@@ -451,6 +489,7 @@ class VSphereConnection(ConnectionUserAndKey):
 
         try:
             self.client = connect.SmartConnect(**kwargs)
+            connect.SetSi(None)  # removes connection object from the global scope
         except Exception as e:
             message = '{}'.format(e)
             if 'incorrect user name' in message:
@@ -462,8 +501,15 @@ class VSphereConnection(ConnectionUserAndKey):
             if 'name or service not known' in message:
                 raise LibcloudError(
                     "Check that the vSphere host is accessible.")
+            raise LibcloudError(message)
 
-        atexit.register(connect.Disconnect, self.client)
+        if self._disconnect_on_terminate:
+            atexit.register(self.disconnect)
+
+    def disconnect(self):
+        if self.client is not None:
+            connect.Disconnect(self.client)
+            self.client = None
 
 
 class VSphereNodeDriver(NodeDriver):
@@ -482,8 +528,10 @@ class VSphereNodeDriver(NodeDriver):
     }
 
     def __init__(self, username, password, secure=True,
-                 host=None, port=None, url=None, timeout=None, **kwargs):
+                 host=None, port=None, url=None, timeout=None,
+                 disconnect_on_terminate=True, **kwargs):
         self.url = url
+        self._disconnect_on_terminate = disconnect_on_terminate
         super(VSphereNodeDriver, self).__init__(
             key=username, secret=password,
             secure=secure, host=host,
@@ -492,7 +540,8 @@ class VSphereNodeDriver(NodeDriver):
 
     def _ex_connection_class_kwargs(self):
         kwargs = {
-            'url': self.url
+            'url': self.url,
+            'disconnect_on_terminate': self._disconnect_on_terminate
         }
 
         return kwargs
@@ -644,7 +693,12 @@ class VSphereNodeDriver(NodeDriver):
             volumes = []
             for file_info in vmdk_files:
                 devices = virtual_disks.get(file_info.path) or []
-                volume = self._to_volume(file_info, devices=devices)
+                try:
+                    volume = self._to_volume(file_info, devices=devices)
+                except LibcloudError as err:
+                    # one broken volume should not break the whole iteration
+                    warnings.warn(str(err))
+                    continue
 
                 created_at = volume_creation_times.get(volume.id)
                 for device in devices:
@@ -759,6 +813,8 @@ class VSphereNodeDriver(NodeDriver):
         Example URLs:
          - `/vmfs/volumes/599d9c57-a93b0b7a-ea4c-984be16496c6`
          - `ds:///vmfs/volumes/599d9c57-a93b0b7a-ea4c-984be16496c6/volume.vmdk`
+
+        :raise :class:`LibcloudError`: When volume URL format is invalid.
 
         :type url: str | :class:`vim.vm.ConfigInfo.DatastoreUrlPair` | list
         :rtype: str | None
@@ -984,6 +1040,12 @@ class VSphereNodeDriver(NodeDriver):
                 yield event
             events = history_collector.ReadPreviousEvents(page_size)
 
+        try:
+            # try to delete EventHistoryCollector properly
+            history_collector.DestroyCollector()
+        except Exception as err:
+            warnings.warn(str(err))
+
     def _query_vm_virtual_disks(self, virtual_machine=None):
         """
         Return properties of :class:`vim.vm.device.VirtualDisk`.
@@ -1183,6 +1245,10 @@ class VSphereNodeDriver(NodeDriver):
         :type file_info: :class:`_FileInfo`.
         :param devices: The list of attached devices.
         :type devices: list[:class:`_VMDiskInfo`]
+
+        :raise :class:`LibcloudError`: When creating volume with multiple
+            non-shared devices.
+        :raise :class:`LibcloudError`: When volume URL format is invalid.
 
         :rtype: :class:`StorageVolume`
         """

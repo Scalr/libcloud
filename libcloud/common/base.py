@@ -20,6 +20,7 @@ import socket
 import copy
 import binascii
 import time
+import weakref
 import urllib
 
 from libcloud.utils.py3 import ET
@@ -985,7 +986,7 @@ class BaseDriver(object):
             'proxy_url': kwargs.pop('proxy_url', None)})
         self.connection = self.connectionCls(*args, **conn_kwargs)
 
-        self.connection.driver = self
+        self.connection.driver = weakref.proxy(self)
         self.connection.connect()
 
     def _ex_connection_class_kwargs(self):
