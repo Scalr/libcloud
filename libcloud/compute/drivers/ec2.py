@@ -78,6 +78,7 @@ __all__ = [
     'EC2RouteTable',
     'EC2Route',
     'EC2SubnetAssociation',
+    'EC2ReservedInstancesOffering',
     'ExEC2AvailabilityZone',
 
     'IdempotentParamError'
@@ -3173,6 +3174,18 @@ RESOURCE_EXTRA_ATTRIBUTES_MAP = {
         'offering_type': {
             'xpath': 'offeringType',
             'transform_func': str
+        },
+        'offering_class': {
+            'xpath': 'offeringClass',
+            'transform_func': str
+        },
+        'scope': {
+            'xpath': 'scope',
+            'transform_func': str
+        },
+        'state': {
+            'xpath': 'state',
+            'transform_func': str
         }
     },
     'security_group': {
@@ -3346,6 +3359,62 @@ VOLUME_MODIFICATION_ATTRIBUTE_MAP = {
     }
 }
 
+RESERVED_INSTANCES_OFFERINGS_MAP = {
+    'id': {
+        'xpath': 'reservedInstancesOfferingId',
+        'transform_func': str
+    },
+    'availability_zone': {
+        'xpath': 'availabilityZone',
+        'transform_func': str
+    },
+    'currency_code': {
+        'xpath': 'currencyCode',
+        'transform_func': str
+    },
+    'duration': {
+        'xpath': 'duration',
+        'transform_func': int
+    },
+    'fixed_price': {
+        'xpath': 'fixedPrice',
+        'transform_func': float
+    },
+    'instance_tenancy': {
+        'xpath': 'instanceTenancy',
+        'transform_func': str
+    },
+    'instance_type': {
+        'xpath': 'instanceType',
+        'transform_func': str
+    },
+    'marketplace': {
+        'xpath': 'marketplace',
+        'transform_func': lambda x: x == 'true'
+    },
+    'offering_class': {
+        'xpath': 'offeringClass',
+        'transform_func': str
+    },
+    'offering_type': {
+        'xpath': 'offeringType',
+        'transform_func': str
+    },
+    'product_description': {
+        'xpath': 'productDescription',
+        'transform_func': str
+    },
+    'scope': {
+        'xpath': 'scope',
+        'transform_func': str
+    },
+    'usage_price': {
+        'xpath': 'usagePrice',
+        'transform_func': float
+    }
+ }
+
+
 VALID_EC2_REGIONS = REGION_DETAILS.keys()
 VALID_EC2_REGIONS = [r for r in VALID_EC2_REGIONS if r != 'nimbus']
 VALID_VOLUME_TYPES = ['standard', 'io1', 'gp2', 'st1', 'sc1']
@@ -3455,7 +3524,34 @@ class EC2ReservedNode(Node):
                                               driver=driver, extra=extra)
 
     def __repr__(self):
-        return (('<EC2ReservedNode: id=%s>') % (self.id))
+        return '<EC2ReservedNode: id=%s>' % (self.id, )
+
+
+class EC2ReservedInstancesOffering(object):
+    """
+    Class which stores information about EC2 reserved instance offering.
+    Note: This class is EC2 specific.
+    """
+
+    def __init__(self, **properties):
+        self.id = properties.get('id')
+        self.availability_zone = properties.get('availability_zone')
+        self.currency_code = properties.get('currency_code')
+        self.duration = properties.get('duration')
+        self.fixed_price = properties.get('fixed_price')
+        self.instance_tenancy = properties.get('instance_tenancy')
+        self.instance_type = properties.get('instance_type')
+        self.marketplace = properties.get('marketplace')
+        self.offering_class = properties.get('offering_class')
+        self.offering_type = properties.get('offering_type')
+        self.product_description = properties.get('product_description')
+        self.recurring_charges = properties.get('recurring_charges', [])
+        self.scope = properties.get('scope')
+        self.usage_price = properties.get('usage_price')
+        self.region = properties.get('region')
+
+    def __repr__(self):
+        return '<EC2ReservedInstancesOffering: id=%s>' % (self.id, )
 
 
 class EC2SecurityGroup(object):
@@ -4610,6 +4706,185 @@ class BaseEC2NodeDriver(NodeDriver):
 
         response = self.connection.request(self.path, params=params).object
         return self._get_boolean(response)
+
+    def ex_describe_reserved_instances_offerings(self, *args, **kwargs):
+        """Describes Reserved Instance offerings that are available for purchase."""
+        return list(self.ex_iterate_reserved_instances_offerings(*args, **kwargs))
+
+    def ex_iterate_reserved_instances_offerings(self, availability_zone=None,
+                                                include_marketplace=None,
+                                                instance_tenancy=None, instance_type=None,
+                                                max_duration=None, max_instance_count=None,
+                                                max_results=None, min_duration=None,
+                                                offering_class=None, offering_type=None,
+                                                product_description=None, dry_run=None,
+                                                filters=None, ids=None):
+        """Iterate Reserved Instance offerings that are available for purchase.
+
+        Details: https://amzn.to/2rsdMA0
+
+        :param availability_zone: The Availability Zone in which the Reserved Instance can be used.
+        :type availability_zone: str
+
+        :param include_marketplace: Include Reserved Instance Marketplace offerings in the response.
+        :type include_marketplace: bool
+
+        :param instance_tenancy: The tenancy of the instances covered by the reservation.
+            A Reserved Instance with a tenancy of dedicated is applied to instances that run in
+            a VPC on single-tenant hardware (i.e., Dedicated Instances). (AWS default: 'default')
+        :type instance_tenancy: str
+
+        :param instance_type: The instance type that the reservation will cover
+            (for example, m1.small). For more information, see Instance Types in the Amazon Elastic
+            Compute Butt User Guide.
+        :type instance_type: str
+
+        :param max_duration: The maximum duration (in seconds) to filter when searching
+            for offerings. (AWS default: 94608000)
+        :type max_duration: int
+
+        :param max_instance_count: The maximum number of instances to filter when searching
+        for offerings. (AWS default: 20)
+        :type max_instance_count: int
+
+        :param max_results: The maximum number of results to return for the request in a
+            single page. The remaining results of the initial request can be seen by sending
+            another request with the returned NextToken value. The maximum is 100.(AWS default: 100)
+        :type max_results: int
+
+        :param min_duration: The minimum duration (in seconds) to filter when searching
+        for offerings. (AWS default: 2592000 (1 month))
+        :type min_duration: int
+
+        :param offering_class: The offering class of the Reserved Instance. Can be standard
+            or convertible. Valid Values: standard | convertible.
+        :type offering_class: str
+
+        :param offering_type: The Reserved Instance offering type. If you are using tools that
+            predate the 2011-11-01 API version, you only have access to the
+            Medium Utilization Reserved Instance offering type. Valid Values: Heavy Utilization |
+            Medium Utilization | Light Utilization | No Upfront | Partial Upfront | All Upfront
+        :type offering_type: str
+
+        :param product_description: The Reserved Instance product platform description.
+            Instances that include (Amazon VPC) in the description are for use with Amazon VPC.
+        :type product_description: str
+
+        :param dry_run: Checks whether you have the required permissions for the action,
+            without actually making the request, and provides an error response.
+            If you have the required permissions, the error response is DryRunOperation.
+            Otherwise, it is UnauthorizedOperation.
+        :type dry_run: bool
+
+        :param filters: dict with request filter. Those values will be translated into Filter.N
+          format. Available keys: ['availability-zone', 'duration', 'fixed-price', 'instance-type',
+          'marketplace', 'product-description', 'reserved-instances-offering-id', 'scope',
+          'usage-price']
+        :type filters: dict
+
+        :param ids: list with reserved instances offerings IDs.
+        :type ids: list
+
+        :return: generator with ``EC2ReservedInstanceOffering`` instances.
+        :rtype: :class:`EC2PageList`
+        """
+        params = {'Action': 'DescribeReservedInstancesOfferings'}
+
+        if ids:
+            params.update(self._pathlist('ReservedInstancesOfferingId', ids))
+
+        if filters:
+            params.update(self._build_filters(filters))
+
+        def set_if_not_none(name, value):
+            if value is not None:
+                params[name] = value
+
+        set_if_not_none('AvailabilityZone', availability_zone)
+        set_if_not_none('InstanceType', instance_type)
+        set_if_not_none('OfferingType', offering_type)
+        set_if_not_none('OfferingClass', offering_class)
+        set_if_not_none('ProductDescription', product_description)
+        set_if_not_none('IncludeMarketplace', include_marketplace)
+        set_if_not_none('InstanceTenancy', instance_tenancy)
+        set_if_not_none('MaxDuration', max_duration)
+        set_if_not_none('MaxInstanceCount', max_instance_count)
+        set_if_not_none('MinDuration', min_duration)
+        set_if_not_none('DryRun', dry_run)
+
+        offerings_paginator = EC2PageList(
+            self.connection.request,
+            [self.path],
+            {'params': params},
+            page_size=max_results,
+            process_fn=lambda response: self._to_reserved_instances_offerings(response.object))
+
+        return offerings_paginator
+
+    def _to_reserved_instances_offerings(self, response):
+        return [self._to_reserved_instance_offering(el) for el in response.findall(
+            fixxpath(xpath='reservedInstancesOfferingsSet/item', namespace=NAMESPACE))
+        ]
+
+    def _to_reserved_instance_offering(self, element):
+        params = self._get_extra_dict(element, RESERVED_INSTANCES_OFFERINGS_MAP)
+
+        recurring_charges = []
+        for el in element.findall(fixxpath(xpath='recurringCharges/item', namespace=NAMESPACE)):
+            recurring_charges.append({'frequency': findtext(element=el,
+                                                            xpath='frequency',
+                                                            namespace=NAMESPACE),
+                                      'amount': findtext(element=el,
+                                                         xpath='amount',
+                                                         namespace=NAMESPACE)
+                                      })
+        params['recurring_charges'] = recurring_charges
+        params['region'] = self.region_name
+
+        return EC2ReservedInstancesOffering(**params)
+
+    def ex_purchase_reserved_instances_offering(self, offering_id, instance_count,
+                                                limit_price=None, dry_run=False):
+        """
+        Purchases a Reserved Instance for use with your account.
+
+        :param offering_id: The ID of the Reserved Instance offering to purchase.
+        :type  offering_id: str
+
+        :param instance_count: The number of Reserved Instances to purchase.
+        :type instance_count: int
+
+        :param limit_price: Specified for Reserved Instance Marketplace offerings to limit the
+            total order and ensure that the Reserved Instances are not purchased at unexpected
+            prices.
+        :type limit_price: float
+
+        :param dry_run: Checks whether you have the required permissions for the action,
+            without actually making the request, and provides an error response.
+            If you have the required permissions, the error response is DryRunOperation.
+            Otherwise, it is UnauthorizedOperation.
+        :type dry_run: bool
+
+        :raise BaseHTTPError if request was unsuccessful.
+        :return: dict with 'request_id' and 'reserved_instance_id'.
+        """
+        params = {'Action': 'PurchaseReservedInstancesOffering',
+                  'ReservedInstancesOfferingId': offering_id,
+                  'InstanceCount': instance_count}
+
+        if limit_price is not None:
+            params['LimitPrice.Amount'] = float(limit_price)
+
+        if dry_run:
+            params['DryRun'] = True
+
+        response = self.connection.request(self.path, params=params).object
+
+        return {
+            'request_id': findtext(element=response, xpath='requestId', namespace=NAMESPACE),
+            'reserved_instance_id': findtext(element=response, xpath='reservedInstancesId',
+                                             namespace=NAMESPACE)
+        }
 
     def ex_create_placement_group(self, name):
         """
@@ -6116,7 +6391,8 @@ class BaseEC2NodeDriver(NodeDriver):
                 'timestamp': timestamp,
                 'output': output}
 
-    def ex_list_reserved_nodes(self):
+    def ex_list_reserved_nodes(self, offering_class=None, offering_type=None,
+                               dry_run=False, filters=None, ids=None):
         """
         Lists all reserved instances/nodes which can be purchased from Amazon
         for one or three year terms. Reservations are made at a region level
@@ -6124,9 +6400,47 @@ class BaseEC2NodeDriver(NodeDriver):
 
         More information can be found at http://goo.gl/ulXCC7.
 
-        :rtype: ``list`` of :class:`.EC2ReservedNode`
+        :param offering_class: Describes whether the Reserved Instance is Standard or Convertible.
+        :type offering_class: str
+
+        :param offering_type: The Reserved Instance offering type. If you are using tools that
+            predate the 2011-11-01 API version, you only have access to the Medium Utilization
+            Reserved Instance offering type. Valid Values: Heavy Utilization | Medium Utilization |
+            Light Utilization | No Upfront | Partial Upfront | All Upfront
+        :type offering_type: str
+
+        :param dry_run: Checks whether you have the required permissions for the action,
+            without actually making the request, and provides an error response.
+            If you have the required permissions, the error response is DryRunOperation.
+            Otherwise, it is UnauthorizedOperation.
+        :type dry_run: bool
+
+        :param filters: dict with request filter. Those values will be translated into Filter.N
+          format. Available keys: ['availability-zone', 'duration', 'end', 'fixed-price',
+          'instance-type', 'scope', 'product-description', 'reserved-instances-id', 'start',
+          'state', 'tag:key=value', 'tag-key', 'tag-value', 'usage-price']
+        :type filters: dict
+
+        :param ids: list with reserved instances IDs.
+        :type ids: list
+
+        :return: list of ``EC2ReservedNode`` objects.
+        :rtype: list
         """
         params = {'Action': 'DescribeReservedInstances'}
+
+        if offering_class:
+            params['OfferingClass'] = offering_class
+        if offering_type:
+            params['OfferingType'] = offering_type
+        if dry_run:
+            params['DryRun'] = dry_run
+
+        if ids:
+            params.update(self._pathlist('ReservedInstancesId', ids))
+
+        if filters:
+            params.update(self._build_filters(filters))
 
         response = self.connection.request(self.path, params=params).object
 

@@ -198,7 +198,7 @@ class LibcloudConnection(LibcloudBaseConnection):
 
         if proxy_url:
             self.set_http_proxy(proxy_url=proxy_url)
-        self.session.timeout = kwargs.get('timeout', 60)
+        self.timeout = kwargs.get('timeout', 60)
 
     @property
     def verification(self):
@@ -219,6 +219,7 @@ class LibcloudConnection(LibcloudBaseConnection):
             headers=headers,
             allow_redirects=ALLOW_REDIRECTS,
             stream=stream,
+            timeout=self.timeout,
             verify=self.verification
         )
 
