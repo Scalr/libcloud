@@ -1390,7 +1390,7 @@ class AzureNodeDriver(NodeDriver):
         :type api_version: str
 
         :return: 1000 usage records per request (Azure limit)
-        :rtype: typing.Iterator[typing.Dict]
+        :rtype: AzurePageList
         """
 
         filter_str = ""
