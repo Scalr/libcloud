@@ -531,7 +531,8 @@ class VSphereNodeDriver(NodeDriver):
     def __init__(
             self, username, password, secure=True, host=None, port=None,
             url=None, timeout=None, disconnect_on_terminate=True,
-            created_at_limit=DEFAULT_EVENTS_DAYS_LIMIT, **kwargs):
+            created_at_limit=DEFAULT_EVENTS_DAYS_LIMIT, allow_caching=False,
+            **kwargs):
         """
         :param created_at_limit: The limit (in days) on the `created_at`
             datetimes, the small value may increase the listing
@@ -541,16 +542,45 @@ class VSphereNodeDriver(NodeDriver):
              - :meth:`self._query_node_creation_times`
              - :meth:`self._query_volume_creation_times`
         :type created_at_limit: int | float | None
+
+        :param allow_caching: Allow data caching for the expensive requests.
+            (optional, `False` by default)
+        :type allow_caching: bool
         """
         self.url = url
         self._disconnect_on_terminate = disconnect_on_terminate
         self._created_at_limit = created_at_limit
+
+        self._allow_caching = allow_caching
+        self._cache = collections.defaultdict(dict)
 
         super(VSphereNodeDriver, self).__init__(
             key=username, secret=password,
             secure=secure, host=host,
             port=port, url=url,
             timeout=timeout, **kwargs)
+
+    def _set_cache(self, name, value):
+        if self._allow_caching:
+            self._cache[name] = value
+
+    def _get_cache(self, name):
+        return self._cache.get(name) if self._allow_caching else None
+
+    def _has_cache(self, name):
+        return name in self._cache if self._allow_caching else False
+
+    def ex_pre_caching(self):
+        """
+        Pre-loading data into cache which is needed in the future.
+        """
+        if not self._allow_caching:
+            raise LibcloudError((
+                "Caching is disabled for {0} instance, use 'allow_caching' "
+                "option."
+            ).format(self.__class__.__name__))
+        self._query_node_creation_times()
+        self._query_volume_creation_times()
 
     def _ex_connection_class_kwargs(self):
         kwargs = {
@@ -859,6 +889,9 @@ class VSphereNodeDriver(NodeDriver):
         if not self._created_at_limit:
             return {}
 
+        if not virtual_machine and self._has_cache('node_creation_times'):
+            return self._get_cache('node_creation_times')
+
         created_events = self._query_events(
             event_type_id=[
                 'VmBeingDeployedEvent',
@@ -869,11 +902,15 @@ class VSphereNodeDriver(NodeDriver):
             entity=virtual_machine,
             begin_time=datetime.now(timezone.utc) - timedelta(days=self._created_at_limit),
         )  # type: list[vim.Event]
-        return {
+
+        node_creation_times = {
             # pylint: disable=protected-access
             event.vm.vm._moId: event.createdTime
             for event in created_events
             if event.vm is not None}
+        self._set_cache('node_creation_times', node_creation_times)
+
+        return node_creation_times
 
     def _query_volume_creation_times(self, virtual_machine=None):
         """
@@ -885,6 +922,9 @@ class VSphereNodeDriver(NodeDriver):
         """
         if not self._created_at_limit:
             return {}
+
+        if not virtual_machine and self._has_cache('volume_creation_times'):
+            return self._get_cache('volume_creation_times')
 
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
@@ -903,6 +943,8 @@ class VSphereNodeDriver(NodeDriver):
             volume_creation_times.update({
                 created_file: event.createdTime
                 for created_file in created_files})
+        self._set_cache('volume_creation_times', volume_creation_times)
+
         return volume_creation_times
 
     def ex_get_vm(self, node_or_uuid):
