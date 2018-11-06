@@ -18,14 +18,15 @@ VMware vSphere driver using pyvmomi - https://github.com/vmware/pyvmomi
 """
 import atexit
 import collections
+import functools
 import os
 import re
 import ssl
 import time
-import functools
 import warnings
 from datetime import datetime
 from datetime import timedelta
+from datetime import timezone
 
 from libcloud.common.base import ConnectionUserAndKey
 from libcloud.common.types import InvalidCredsError
@@ -64,7 +65,7 @@ DEFAULT_PAGE_SIZE = 1000
 VMWare vCenter Server stores events in the database for a limited period.
 The default number of days to retain event messages in the database is 30.
 """
-EVENTS_DAYS_LIMIT = 30
+DEFAULT_EVENTS_DAYS_LIMIT = 30
 
 
 class VSpherePropertyCollector(misc_utils.PageList):
@@ -300,7 +301,7 @@ class VCenterFileSearch(misc_utils.PageList):
             self._datastores_info = None
             return result
 
-        if not self._wait_for_task(task, interval=0.4):
+        if not self._wait_for_task(task):
             # unable to get files
             return result
 
@@ -319,7 +320,7 @@ class VCenterFileSearch(misc_utils.PageList):
                 modification=file_info.modification))
         return result
 
-    def _wait_for_task(self, task, timeout=1800, interval=10):
+    def _wait_for_task(self, task, timeout=300, interval=0.4):
         """
         Wait for a vCenter task to finish.
 
@@ -527,11 +528,24 @@ class VSphereNodeDriver(NodeDriver):
         'suspended': NodeState.SUSPENDED,
     }
 
-    def __init__(self, username, password, secure=True,
-                 host=None, port=None, url=None, timeout=None,
-                 disconnect_on_terminate=True, **kwargs):
+    def __init__(
+            self, username, password, secure=True, host=None, port=None,
+            url=None, timeout=None, disconnect_on_terminate=True,
+            created_at_limit=DEFAULT_EVENTS_DAYS_LIMIT, **kwargs):
+        """
+        :param created_at_limit: The limit (in days) on the `created_at`
+            datetimes, the small value may increase the listing
+            performance. (optional, 30 by default)
+
+            See:
+             - :meth:`self._query_node_creation_times`
+             - :meth:`self._query_volume_creation_times`
+        :type created_at_limit: int | float | None
+        """
         self.url = url
         self._disconnect_on_terminate = disconnect_on_terminate
+        self._created_at_limit = created_at_limit
+
         super(VSphereNodeDriver, self).__init__(
             key=username, secret=password,
             secure=secure, host=host,
@@ -842,6 +856,9 @@ class VSphereNodeDriver(NodeDriver):
         :type virtual_machine: :class:`vim.VirtualMachine`
         :rtype: dict[str, :class:`datetime.datetime`]
         """
+        if not self._created_at_limit:
+            return {}
+
         created_events = self._query_events(
             event_type_id=[
                 'VmBeingDeployedEvent',
@@ -850,12 +867,13 @@ class VSphereNodeDriver(NodeDriver):
                 'VmClonedEvent'
             ],
             entity=virtual_machine,
-            begin_time=datetime.now() - timedelta(days=EVENTS_DAYS_LIMIT)
+            begin_time=datetime.now(timezone.utc) - timedelta(days=self._created_at_limit),
         )  # type: list[vim.Event]
         return {
             # pylint: disable=protected-access
-            event.vm.vm._GetMoId(): event.createdTime
-            for event in created_events}
+            event.vm.vm._moId: event.createdTime
+            for event in created_events
+            if event.vm is not None}
 
     def _query_volume_creation_times(self, virtual_machine=None):
         """
@@ -865,10 +883,13 @@ class VSphereNodeDriver(NodeDriver):
         :type virtual_machine: :class:`vim.VirtualMachine`
         :rtype: dict[str, :class:`datetime.datetime`]
         """
+        if not self._created_at_limit:
+            return {}
+
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
             entity=virtual_machine,
-            begin_time=datetime.now() - timedelta(days=EVENTS_DAYS_LIMIT)
+            begin_time=datetime.now(timezone.utc) - timedelta(days=self._created_at_limit)
         )  # type: list[vim.Event]
 
         volume_creation_times = {}  # type: dict[str, datetime.datetime]
