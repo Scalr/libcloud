@@ -570,17 +570,32 @@ class VSphereNodeDriver(NodeDriver):
     def _has_cache(self, name):
         return name in self._cache if self._allow_caching else False
 
-    def ex_pre_caching(self):
+    def ex_pre_caching(
+            self,
+            node_creation_times=True,
+            volume_creation_times=True):
         """
         Pre-loading data into cache which is needed in the future.
+
+        :param node_creation_times: Pre-cache the nodes/images creation
+            timestamps.
+        :type node_creation_times: bool
+
+        :param volume_creation_times: Pre-cache the volumes creation timestamps.
+        :type volume_creation_times: bool
         """
         if not self._allow_caching:
             raise LibcloudError((
                 "Caching is disabled for {0} instance, use 'allow_caching' "
                 "option."
             ).format(self.__class__.__name__))
-        self._query_node_creation_times()
-        self._query_volume_creation_times()
+
+        if volume_creation_times:
+            # the volumes listing requires the nodes timestamps
+            node_creation_times = True
+            self._query_volume_creation_times()
+        if node_creation_times:
+            self._query_node_creation_times()
 
     def _ex_connection_class_kwargs(self):
         kwargs = {
@@ -889,7 +904,7 @@ class VSphereNodeDriver(NodeDriver):
         if not self._created_at_limit:
             return {}
 
-        if not virtual_machine and self._has_cache('node_creation_times'):
+        if self._has_cache('node_creation_times'):
             return self._get_cache('node_creation_times')
 
         created_events = self._query_events(
@@ -908,7 +923,10 @@ class VSphereNodeDriver(NodeDriver):
             event.vm.vm._moId: event.createdTime
             for event in created_events
             if event.vm is not None}
-        self._set_cache('node_creation_times', node_creation_times)
+
+        if not virtual_machine:
+            # per-vm request is lightweight, there's no sense in caching
+            self._set_cache('node_creation_times', node_creation_times)
 
         return node_creation_times
 
@@ -923,7 +941,7 @@ class VSphereNodeDriver(NodeDriver):
         if not self._created_at_limit:
             return {}
 
-        if not virtual_machine and self._has_cache('volume_creation_times'):
+        if self._has_cache('volume_creation_times'):
             return self._get_cache('volume_creation_times')
 
         reconfigure_events = self._query_events(
@@ -943,7 +961,10 @@ class VSphereNodeDriver(NodeDriver):
             volume_creation_times.update({
                 created_file: event.createdTime
                 for created_file in created_files})
-        self._set_cache('volume_creation_times', volume_creation_times)
+
+        if not virtual_machine:
+            # per-vm request is lightweight, there's no sense in caching
+            self._set_cache('volume_creation_times', volume_creation_times)
 
         return volume_creation_times
 
