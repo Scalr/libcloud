@@ -1369,7 +1369,7 @@ class VSphereNodeDriver(NodeDriver):
             'path': getattr(config, 'vmPathName', None),
             'guest_id': getattr(config, 'guestId', None),
             'template': getattr(config, 'template', None),
-            'overall_status': getattr(config, 'overallStatus', None),
+            'overall_status': getattr(summary, 'overallStatus', None),
             'operating_system': getattr(config, 'guestFullName', None),
             'cpus': getattr(config, 'numCpu', None),
             'memory_mb': getattr(config, 'memorySizeMB', None),
