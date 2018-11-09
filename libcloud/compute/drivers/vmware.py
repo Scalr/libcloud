@@ -70,11 +70,6 @@ DEFAULT_EVENTS_DAYS_LIMIT = 30
 
 LOG = logging.getLogger(__name__)
 
-if os.environ.get('LIBCLOUD_DEBUG'):
-    LOG.setLevel(logging.DEBUG)
-else:
-    LOG.setLevel(logging.WARNING)
-
 
 class VSpherePropertyCollector(misc_utils.PageList):
     # pylint: disable=line-too-long
