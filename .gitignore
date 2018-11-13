@@ -30,3 +30,5 @@ include/
 lib/
 pip-selfcheck.json
 report.html
+.mypy_cache/
+.python-version
