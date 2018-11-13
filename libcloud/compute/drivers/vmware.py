@@ -18,14 +18,15 @@ VMware vSphere driver using pyvmomi - https://github.com/vmware/pyvmomi
 """
 import atexit
 import collections
+import functools
+import logging
 import os
 import re
 import ssl
 import time
-import functools
-import warnings
 from datetime import datetime
 from datetime import timedelta
+from datetime import timezone
 
 from libcloud.common.base import ConnectionUserAndKey
 from libcloud.common.types import InvalidCredsError
@@ -64,7 +65,10 @@ DEFAULT_PAGE_SIZE = 1000
 VMWare vCenter Server stores events in the database for a limited period.
 The default number of days to retain event messages in the database is 30.
 """
-EVENTS_DAYS_LIMIT = 30
+DEFAULT_EVENTS_DAYS_LIMIT = 30
+
+
+LOG = logging.getLogger(__name__)
 
 
 class VSpherePropertyCollector(misc_utils.PageList):
@@ -105,6 +109,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
         self._connection = driver.connection
         self._object_cls = object_cls
         self._path_set = path_set
+        self._current_page_num = 0
 
         self._container = container
         self._container_view = None
@@ -140,11 +145,35 @@ class VSpherePropertyCollector(misc_utils.PageList):
         return response.token if response else None
 
     def _retrieve_properties(self):
+        self._current_page_num += 1
+        start_time = time.monotonic()
+        LOG.debug(
+            "%s: Querying page of %ss (container=%s, properties=%s, "
+            "page_num=%d)...",
+            self.__class__.__name__,
+            self._object_cls.__name__,
+            self._container,
+            self._path_set or 'all',
+            self._current_page_num)
+
         if self.next_page_token is None:
             self._collector, retrieve_args = self._create_property_collector()
-            return self._collector.RetrievePropertiesEx(*retrieve_args)
-        return self._collector.ContinueRetrievePropertiesEx(
-            token=self.next_page_token)
+            result = self._collector.RetrievePropertiesEx(*retrieve_args)
+        else:
+            result = self._collector.ContinueRetrievePropertiesEx(
+                token=self.next_page_token)
+
+        LOG.debug(
+            "%s: Querying page of %d %ss (container=%s, properties=%s, "
+            "page_num=%d) finished in %.3f seconds.",
+            self.__class__.__name__,
+            len(getattr(result, 'objects', [])),
+            self._object_cls.__name__,
+            self._container,
+            self._path_set or 'all',
+            self._current_page_num,
+            time.monotonic() - start_time)
+        return result
 
     def _create_property_collector(self):
         """
@@ -154,7 +183,7 @@ class VSpherePropertyCollector(misc_utils.PageList):
             :meth:`vmodl.query.PropertyCollector.RetrieveProperties` method.
         :rtype: tulpe(:class:`vmodl.query.PropertyCollector`, tuple)
         """
-        content = self._connection.client.RetrieveContent()
+        content = self._connection.content
         self._container_view = content.viewManager.CreateContainerView(
             container=self._container or content.rootFolder,
             type=[self._object_cls],
@@ -209,8 +238,9 @@ class VSpherePropertyCollector(misc_utils.PageList):
                 self._container_view.DestroyView()
                 self._container_view = None
             except Exception as err:
-                warnings.warn(str(err))
+                LOG.warning(str(err))
         self._collector = None
+        self._current_page_num = 0
 
 
 class VCenterFileSearch(misc_utils.PageList):
@@ -251,7 +281,6 @@ class VCenterFileSearch(misc_utils.PageList):
         self._file_query = file_query  # type: vim.FileQuery
         self._datacenter = datacenter
         self._search_tasks = None  # type: Iterator
-        self._datastores_info = None  # type: list[vim.host.VmfsDatastoreInfo]
 
         super(VCenterFileSearch, self).__init__(
             request_fn=self._retrieve_files,
@@ -276,7 +305,6 @@ class VCenterFileSearch(misc_utils.PageList):
                 datastores = self._datacenter.datastore
             else:
                 datastores = self._driver.ex_list_datastores()
-            datastores_info = [datastore.info for datastore in datastores]
             filter_query_flags = vim.FileQueryFlags(
                 fileSize=True,
                 fileType=True,
@@ -287,56 +315,99 @@ class VCenterFileSearch(misc_utils.PageList):
                 details=filter_query_flags,
                 sortFoldersFirst=True)
 
-            self._search_tasks = (
-                ds.browser.SearchSubFolders('[{}]'.format(ds.name), search_spec)
-                for ds in datastores)
-            self._datastores_info = datastores_info
+            self._search_tasks = []
+            for index, datastore in enumerate(datastores):
+                search_task = datastore.browser.SearchSubFolders(
+                    '[{}]'.format(datastore.name),
+                    search_spec)
+                task_id = search_task.info.key.split(']', 1)[-1]
+                LOG.debug(
+                    "%s: Started SearchSubFolders task (id=%s, datastore=%s, "
+                    "number=%d/%d)",
+                    self.__class__.__name__,
+                    task_id,
+                    datastore._moId,
+                    index + 1,
+                    len(datastores))
+                self._search_tasks.append((task_id, search_task, time.monotonic()))
+            self._search_tasks = iter(self._search_tasks)
 
         result = []
         try:
-            task = next(self._search_tasks)
+            task_id, task, start_time = next(self._search_tasks)
         except StopIteration:
             self._search_tasks = None
-            self._datastores_info = None
             return result
 
-        if not self._wait_for_task(task, interval=0.4):
+        task_result = self._wait_for_task(task, task_id, start_time=start_time)
+        if not task_result:
             # unable to get files
             return result
 
         files = (
             (files.folderPath, info)
-            for files in task.info.result
+            for files in task_result
             for info in files.file)
         for folder_path, file_info in files:
             full_path = self._driver.ex_file_name_to_path(
-                name='{}{}'.format(folder_path, file_info.path),
-                datastores_info=self._datastores_info)
+                name='{}{}'.format(folder_path, file_info.path))
             result.append(_FileInfo(
                 path=full_path,
                 size=int(file_info.fileSize) / 1024,
                 owner=file_info.owner,
                 modification=file_info.modification))
+        LOG.debug(
+            "%s: Processed %s results from SearchSubFolders task (id=%s)",
+            self.__class__.__name__,
+            len(result),
+            task_id)
         return result
 
-    def _wait_for_task(self, task, timeout=1800, interval=10):
+    def _wait_for_task(
+            self,
+            task,
+            task_id=None,
+            start_time=None,
+            timeout=300,
+            interval=0.5):
         """
         Wait for a vCenter task to finish.
 
         :returns: Result if task is successfully completed, otherwise it
             returns a ``None``.
         """
-        start_time = time.time()
+        start_time = start_time or time.monotonic()
+        task_info = task.info
+        task_id = task_id or task_info.key.split(']', 1)[-1]
+
         while True:
-            if time.time() - start_time >= timeout:
+            LOG.debug(
+                "%s: Waiting for SearchSubFolders task (id=%s, state=%s, running_time=%.3f "
+                "sec)...",
+                self.__class__.__name__,
+                task_id,
+                task_info.state,
+                time.monotonic() - start_time)
+            if time.monotonic() - start_time >= timeout:
                 raise Exception((
                     "Timeout while waiting for import task ID {}"
-                ).format(task.info.id))
-            if task.info.state == vim.TaskInfo.State.success:
-                return task.info.result
-            if task.info.state == vim.TaskInfo.State.error:
-                return
+                ).format(task_info.id))
+
+            if task_info.state in (
+                    vim.TaskInfo.State.success,
+                    vim.TaskInfo.State.error):
+                LOG.debug(
+                    "%s: SearchSubFolders task (id=%s, state=%s) finished "
+                    "in %.3f seconds",
+                    self.__class__.__name__,
+                    task_id,
+                    task_info.state,
+                    time.monotonic() - start_time)
+                if task_info.state == vim.TaskInfo.State.success:
+                    return task_info.result
+                break
             time.sleep(interval)
+            task_info = task.info
 
 
 class _FileInfo(object):
@@ -344,23 +415,32 @@ class _FileInfo(object):
     Stores info about the VMware file.
     """
 
-    def __init__(self, path, size=None, owner=None, modification=None):
+    def __init__(self, path, size=None, owner=None, modification=None, devices=None):
         """
         :param str path: The path to the file.
         :param int size: The size of the file in **kilobytes**.
         :param str owner: The user name of the owner of the file.
         :param :class:`datetime.datetime` modification: The last date and time
             the file was modified.
+        :param list devices: The list of virtual devices associated with the
+            VMDK file.
         """
         self.path = path
         self.size = size
         self.owner = owner
         self.modification = modification
+        self.devices = devices or []
 
     @property
     def size_in_gb(self):
         if self.size is not None:
             return round(self.size / (1024.0 ** 2), 1)
+
+    def __eq__(self, other):
+        return self.path == other.path
+
+    def __hash__(self):
+        return hash(self.path)
 
     def __repr__(self):
         return (
@@ -409,7 +489,7 @@ class _VMDiskInfo(object):
         """
         :rtype: :class:`_FileInfo`
         """
-        return _FileInfo(self.file_path, size=self.size)
+        return _FileInfo(self.file_path, size=self.size, devices=[self])
 
     @property
     def is_root(self):
@@ -424,6 +504,12 @@ class _VMDiskInfo(object):
         return self.scsi_host == 7 \
             and self.scsi_bus == 0 \
             and self.scsi_lun == 0
+
+    def __eq__(self, other):
+        return self.disk_id == other.disk_id
+
+    def __hash__(self):
+        return hash(self.disk_id)
 
     def __repr__(self):
         return (
@@ -466,6 +552,7 @@ class VSphereConnection(ConnectionUserAndKey):
 
         self._disconnect_on_terminate = disconnect_on_terminate
         self.client = None
+        self.content = None  # type: tp.Optional[vim.ServiceInstanceContent]
         super(VSphereConnection, self).__init__(
             user_id=user_id,
             key=key, secure=secure,
@@ -489,6 +576,7 @@ class VSphereConnection(ConnectionUserAndKey):
 
         try:
             self.client = connect.SmartConnect(**kwargs)
+            self.content = self.client.RetrieveContent()
             connect.SetSi(None)  # removes connection object from the global scope
         except Exception as e:
             message = '{}'.format(e)
@@ -510,6 +598,7 @@ class VSphereConnection(ConnectionUserAndKey):
         if self.client is not None:
             connect.Disconnect(self.client)
             self.client = None
+        self.content = None
 
 
 class VSphereNodeDriver(NodeDriver):
@@ -527,16 +616,78 @@ class VSphereNodeDriver(NodeDriver):
         'suspended': NodeState.SUSPENDED,
     }
 
-    def __init__(self, username, password, secure=True,
-                 host=None, port=None, url=None, timeout=None,
-                 disconnect_on_terminate=True, **kwargs):
+    def __init__(
+            self, username, password, secure=True, host=None, port=None,
+            url=None, timeout=None, disconnect_on_terminate=True,
+            created_at_limit=DEFAULT_EVENTS_DAYS_LIMIT, allow_caching=False,
+            **kwargs):
+        """
+        :param created_at_limit: The limit (in days) on the `created_at`
+            datetimes, the small value may increase the listing
+            performance. (optional, 30 by default)
+
+            See:
+             - :meth:`self._query_node_creation_times`
+             - :meth:`self._query_volume_creation_times`
+        :type created_at_limit: int | float | None
+
+        :param allow_caching: Allow data caching for the expensive requests.
+            (optional, `False` by default)
+        :type allow_caching: bool
+        """
         self.url = url
         self._disconnect_on_terminate = disconnect_on_terminate
+        self._created_at_limit = created_at_limit
+
+        self._allow_caching = allow_caching
+        self._cache = collections.defaultdict(dict)
+
         super(VSphereNodeDriver, self).__init__(
             key=username, secret=password,
             secure=secure, host=host,
             port=port, url=url,
             timeout=timeout, **kwargs)
+
+    def _set_cache(self, name, value):
+        if self._allow_caching:
+            self._cache[name] = value
+
+    def _get_cache(self, name):
+        return self._cache.get(name) if self._allow_caching else None
+
+    def _has_cache(self, name):
+        return name in self._cache if self._allow_caching else False
+
+    def ex_pre_caching(
+            self,
+            node_creation_times=True,
+            volume_creation_times=True):
+        """
+        Pre-loading data into cache which is needed in the future.
+
+        :param node_creation_times: Pre-cache the nodes/images creation
+            timestamps.
+        :type node_creation_times: bool
+
+        :param volume_creation_times: Pre-cache the volumes creation timestamps.
+        :type volume_creation_times: bool
+        """
+        if not self._allow_caching:
+            raise LibcloudError((
+                "Caching is disabled for {0} instance, use 'allow_caching' "
+                "option."
+            ).format(self.__class__.__name__))
+
+        if volume_creation_times:
+            # the volumes listing requires the nodes timestamps
+            node_creation_times = True
+            self._query_volume_creation_times()
+        if node_creation_times:
+            self._query_node_creation_times()
+
+        # required to cache
+        self._get_datastores_info_map()
+        self._get_datacenter_ids_map()
 
     def _ex_connection_class_kwargs(self):
         kwargs = {
@@ -552,7 +703,7 @@ class VSphereNodeDriver(NodeDriver):
 
         :param ex_datacenter: Filters the node list to nodes that are
             located in this datacenter. (optional)
-        :type ex_datacenter: str
+        :type ex_datacenter: str | :class:`vim.Datacenter` | None
 
         :rtype: list[Node]
         """
@@ -583,7 +734,6 @@ class VSphereNodeDriver(NodeDriver):
                     nodes.append(node)
             return nodes
 
-        self._get_datacenter_urls_map.cache_clear()
         return VSpherePropertyCollector(
             self, vim.VirtualMachine,
             path_set=[
@@ -604,7 +754,7 @@ class VSphereNodeDriver(NodeDriver):
 
         :param ex_datacenter: Filters the node list to nodes that are
             located in this datacenter. (optional)
-        :type ex_datacenter: str
+        :type ex_datacenter: str | :class:`vim.Datacenter` | None
 
         :rtype: list[Image]
         """
@@ -636,7 +786,6 @@ class VSphereNodeDriver(NodeDriver):
                     images.append(image)
             return images
 
-        self._get_datacenter_urls_map.cache_clear()
         return VSpherePropertyCollector(
             self, vim.VirtualMachine,
             path_set=[
@@ -654,14 +803,11 @@ class VSphereNodeDriver(NodeDriver):
 
         :param ex_datacenter: Filters the volume list to volume that are
             located in this datacenter. (optional)
-        :type ex_datacenter: str
+        :type ex_datacenter: str | :class:`vim.Datacenter` | None
 
         :rtype: list[StorageVolume]
         """
-        return list(self.iterate_volumes(
-            node=node,
-            ex_datacenter=ex_datacenter,
-        ))
+        return list(self.iterate_volumes(node=node, ex_datacenter=ex_datacenter))
 
     def iterate_volumes(self, node=None, ex_datacenter=None):
         """
@@ -669,13 +815,17 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: collections.Iterable[StorageVolume]
         """
-        virtual_machine = self.ex_get_vm(node) if node is not None else None
+        if node is not None:
+            if ex_datacenter:
+                raise ValueError(
+                    "Cannot list the volumes for the datacenter and the "
+                    "virtual machine at the same time")
+            virtual_machine = self.ex_get_vm(node)
+        else:
+            virtual_machine = None
 
-        # querying the virtual disks of node(s)
-        virtual_disks = collections.defaultdict(list)
-        for disk in self._query_vm_virtual_disks(
-                virtual_machine=virtual_machine):
-            virtual_disks[disk.file_path].append(disk)
+        if ex_datacenter is not None:
+            ex_datacenter = self._get_datacenter_by_id(ex_datacenter)
 
         # querying the creation timestamps of node(s) and volumes
         node_creation_times = self._query_node_creation_times(
@@ -683,25 +833,34 @@ class VSphereNodeDriver(NodeDriver):
         volume_creation_times = self._query_volume_creation_times(
             virtual_machine=virtual_machine)
 
-        if ex_datacenter is not None:
-            ex_datacenter = self._get_datacenter_by_id(ex_datacenter)
+        shared_files = collections.defaultdict(list)
 
-        def files_to_volumes(vmdk_files):
+        def result_to_volumes(files_info, allow_shared=False):
             """
-            Converts a list of VMDK files to :class:`StorageVolume` objects.
+            :type disks_page: tp.Union[tp.List[_FileInfo], tp.List[_VMDiskInfo]]
+            :rtype: tp.List[StorageVolume]
             """
+            if files_info and isinstance(files_info[0], _VMDiskInfo):
+                files_info = (disk.file_info for disk in files_info)
+
             volumes = []
-            for file_info in vmdk_files:
-                devices = virtual_disks.get(file_info.path) or []
+            for file_info in files_info:
+
+                if not allow_shared and any(
+                        d.sharing
+                        for d in file_info.devices):
+                    shared_files[file_info.path].append(file_info)
+                    continue
+
                 try:
-                    volume = self._to_volume(file_info, devices=devices)
+                    volume = self._to_volume(file_info)
                 except LibcloudError as err:
                     # one broken volume should not break the whole iteration
-                    warnings.warn(str(err))
+                    LOG.warning(str(err))
                     continue
 
                 created_at = volume_creation_times.get(volume.id)
-                for device in devices:
+                for device in file_info.devices:
                     if created_at:
                         break
                     if device.is_root:
@@ -711,15 +870,21 @@ class VSphereNodeDriver(NodeDriver):
                 volumes.append(volume)
             return volumes
 
-        self._get_datacenter_urls_map.cache_clear()
-        if virtual_machine:
-            # iterate over disks on the one virtual machine
-            vmdk_files = {disk[0].file_info for disk in virtual_disks.values()}
-            return iter(files_to_volumes(vmdk_files))
-        return iter(VCenterFileSearch(
-            self, vim.VmDiskFileQuery(),
-            process_fn=files_to_volumes,
-            datacenter=ex_datacenter))
+        for item in self._query_vm_virtual_disks(
+                virtual_machine=virtual_machine,
+                datacenter=ex_datacenter,
+                process_fn=result_to_volumes):
+            yield item
+
+        # collect and yield the shared volumes at the end of iteration
+        merged_shared_files = []
+        for files_info in shared_files.values():
+            files_info[0].devices = list({
+                device for file_info in files_info
+                for device in file_info.devices})
+            merged_shared_files.append(files_info[0])
+        for item in result_to_volumes(merged_shared_files, allow_shared=True):
+            yield item
 
     def list_snapshots(self, ex_datacenter=None, ex_page_size=None):
         """
@@ -727,7 +892,7 @@ class VSphereNodeDriver(NodeDriver):
 
         :param ex_datacenter: Filters the snapshots list to snapshots that are
             located in this datacenter. (optional)
-        :type ex_datacenter: str
+        :type ex_datacenter: str | :class:`vim.Datacenter` | None
 
         :rtype: list[VolumeSnapshot]
         """
@@ -754,7 +919,6 @@ class VSphereNodeDriver(NodeDriver):
                     for snap_tree in self._walk_snapshot_tree(snapshot_trees)])
             return snapshots
 
-        self._get_datacenter_urls_map.cache_clear()
         return VSpherePropertyCollector(
             self, vim.VirtualMachine,
             path_set=[
@@ -790,21 +954,39 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: :class:`vim.Datacenter`
         """
-        datacenter_ids = {
-            datacenter._moId: datacenter
-            for datacenter in self.ex_list_datacenters()}
+        if isinstance(datacenter_id, vim.Datacenter):
+            return datacenter_id
+        datacenter_ids = self._get_datacenter_ids_map()
         if datacenter_id not in datacenter_ids:
             raise ValueError((
-                "Unknown datacenter ID, available: {}"
-            ).format(', '.join(datacenter_ids.keys())))
+                "Unknown datacenter ID '{}', available: {}"
+            ).format(datacenter_id, ', '.join(datacenter_ids.keys())))
         return datacenter_ids[datacenter_id]
 
     @functools.lru_cache()
-    def _get_datacenter_urls_map(self):
+    def _get_datastores_info_map(self):
+        """
+        Returns the datastore info to datacenter map.
+
+        See: https://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.VmfsDatastoreInfo.html
+
+        :rtype: dict[:class:`vim.VmfsDatastoreInfo`, :class:`vim.Datacenter`]
+        """
         return {
-            datastore.info.url: datacenter._moId
+            datastore.info: datacenter
             for datacenter in self.ex_list_datacenters()
             for datastore in datacenter.datastore}
+
+    @functools.lru_cache()
+    def _get_datacenter_ids_map(self):
+        """
+        Returns the datacenter ID to datacenter object map.
+
+        :rtype: dict[str, :class:`vim.Datacenter`]
+        """
+        return {
+            datacenter._moId: datacenter
+            for datacenter in self.ex_list_datacenters()}
 
     def _get_datacenter_id_by_url(self, url):
         """
@@ -832,8 +1014,10 @@ class VSphereNodeDriver(NodeDriver):
         except (ValueError, IndexError):
             raise LibcloudError("Unexpected URL format: {}".format(url))
 
-        datacenter_urls = self._get_datacenter_urls_map()
-        return datacenter_urls.get('ds:///vmfs/volumes/{}/'.format(volume_id))
+        datastore_url = 'ds:///vmfs/volumes/{}/'.format(volume_id)
+        for info, datacenter in self._get_datastores_info_map().items():
+            if info.url == datastore_url:
+                return datacenter._moId
 
     def _query_node_creation_times(self, virtual_machine=None):
         """
@@ -842,6 +1026,12 @@ class VSphereNodeDriver(NodeDriver):
         :type virtual_machine: :class:`vim.VirtualMachine`
         :rtype: dict[str, :class:`datetime.datetime`]
         """
+        if not self._created_at_limit:
+            return {}
+
+        if self._has_cache('node_creation_times'):
+            return self._get_cache('node_creation_times')
+
         created_events = self._query_events(
             event_type_id=[
                 'VmBeingDeployedEvent',
@@ -850,12 +1040,20 @@ class VSphereNodeDriver(NodeDriver):
                 'VmClonedEvent'
             ],
             entity=virtual_machine,
-            begin_time=datetime.now() - timedelta(days=EVENTS_DAYS_LIMIT)
+            begin_time=datetime.now(timezone.utc) - timedelta(days=self._created_at_limit),
         )  # type: list[vim.Event]
-        return {
+
+        node_creation_times = {
             # pylint: disable=protected-access
-            event.vm.vm._GetMoId(): event.createdTime
-            for event in created_events}
+            event.vm.vm._moId: event.createdTime
+            for event in created_events
+            if event.vm is not None}
+
+        if not virtual_machine:
+            # per-vm request is lightweight, there's no sense in caching
+            self._set_cache('node_creation_times', node_creation_times)
+
+        return node_creation_times
 
     def _query_volume_creation_times(self, virtual_machine=None):
         """
@@ -865,10 +1063,16 @@ class VSphereNodeDriver(NodeDriver):
         :type virtual_machine: :class:`vim.VirtualMachine`
         :rtype: dict[str, :class:`datetime.datetime`]
         """
+        if not self._created_at_limit:
+            return {}
+
+        if self._has_cache('volume_creation_times'):
+            return self._get_cache('volume_creation_times')
+
         reconfigure_events = self._query_events(
             event_type_id='VmReconfiguredEvent',
             entity=virtual_machine,
-            begin_time=datetime.now() - timedelta(days=EVENTS_DAYS_LIMIT)
+            begin_time=datetime.now(timezone.utc) - timedelta(days=self._created_at_limit)
         )  # type: list[vim.Event]
 
         volume_creation_times = {}  # type: dict[str, datetime.datetime]
@@ -882,6 +1086,11 @@ class VSphereNodeDriver(NodeDriver):
             volume_creation_times.update({
                 created_file: event.createdTime
                 for created_file in created_files})
+
+        if not virtual_machine:
+            # per-vm request is lightweight, there's no sense in caching
+            self._set_cache('volume_creation_times', volume_creation_times)
+
         return volume_creation_times
 
     def ex_get_vm(self, node_or_uuid):
@@ -893,8 +1102,7 @@ class VSphereNodeDriver(NodeDriver):
         """
         if isinstance(node_or_uuid, Node):
             node_or_uuid = node_or_uuid.extra['instance_uuid']
-        content = self._retrieve_content()
-        vm = content.searchIndex.FindByUuid(
+        vm = self.connection.content.searchIndex.FindByUuid(
             None, node_or_uuid, True, True)
         if not vm:
             raise LibcloudError("Unable to locate VirtualMachine.")
@@ -920,31 +1128,7 @@ class VSphereNodeDriver(NodeDriver):
         """
         return list(VSpherePropertyCollector(self, vim.Datastore))
 
-    def ex_list_datastores_info(self):
-        """
-        Returns the list of info about all datastores.
-
-        See: https://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.VmfsDatastoreInfo.html
-
-        :rtype: list[:class:`vim.VmfsDatastoreInfo`]
-        """
-        datastores = VSpherePropertyCollector(
-            self, vim.Datastore,
-            path_set=['info'],
-            process_fn=lambda res: [result['info'] for result in res.values()])
-        return list(datastores)
-
-    def _retrieve_content(self):
-        """
-        Retrieves the properties of the service instance.
-
-        See: https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.ServiceInstanceContent.html
-
-        :rtype: :class:`vim.ServiceInstanceContent`
-        """
-        return self.connection.client.RetrieveContent()
-
-    def ex_file_name_to_path(self, name, datastores_info):
+    def ex_file_name_to_path(self, name):
         """
         Converts file name to full path.
 
@@ -960,7 +1144,7 @@ class VSphereNodeDriver(NodeDriver):
             raise LibcloudError("Unexpected file name format: {}".format(name))
         datastore_name, file_path = match.group(1, 2)
 
-        for datastore_info in datastores_info:
+        for datastore_info in self._get_datastores_info_map():
             if datastore_info.name == datastore_name:
                 return '{}{}'.format(datastore_info.url, file_path)
 
@@ -1028,25 +1212,52 @@ class VSphereNodeDriver(NodeDriver):
                 userList=userlist,
                 systemUser=system_user or False)
 
-        content = self._retrieve_content()
+        content = self.connection.content
         history_collector = content.eventManager.CreateCollectorForEvents(
             filter_spec)  # type: vim.event.EventHistoryCollector
         history_collector.SetCollectorPageSize(page_size)
         history_collector.ResetCollector()
+        current_page_num = 0
+        events = []
 
-        events = history_collector.latestPage
-        while events:
+        while events or not current_page_num:
+            current_page_num += 1
+            start_time = time.monotonic()
+            LOG.debug(
+                "%s: Querying page of vim.Events (types=%s, begin_time=%s, page_num=%d) ...",
+                self.__class__.__name__,
+                event_type_id,
+                begin_time,
+                current_page_num)
+
+            events = history_collector.ReadPreviousEvents(
+                page_size
+            ) if current_page_num != 1 else history_collector.latestPage
+
+            LOG.debug(
+                "%s: Querying page of %d vim.Events (types=%s, begin_time=%s, page_num=%d) "
+                "finished in %.3f seconds.",
+                self.__class__.__name__,
+                len(events),
+                event_type_id,
+                begin_time,
+                current_page_num,
+                time.monotonic() - start_time)
+
             for event in events:
                 yield event
-            events = history_collector.ReadPreviousEvents(page_size)
 
         try:
             # try to delete EventHistoryCollector properly
             history_collector.DestroyCollector()
         except Exception as err:
-            warnings.warn(str(err))
+            LOG.warning(str(err))
 
-    def _query_vm_virtual_disks(self, virtual_machine=None):
+    def _query_vm_virtual_disks(
+            self,
+            virtual_machine=None,
+            datacenter=None,
+            process_fn=None):
         """
         Return properties of :class:`vim.vm.device.VirtualDisk`.
 
@@ -1056,10 +1267,8 @@ class VSphereNodeDriver(NodeDriver):
         :param virtual_machine: The virtual machine.
         :type virtual_machine: :class:`vim.VirtualMachine`
 
-        :rtype: list[:class:`_VMDiskInfo`]
+        :rtype: tp.Iterable[:class:`_VMDiskInfo`]
         """
-        datastores_info = self.ex_list_datastores_info()
-
         def result_to_disks(result):
             disks_info = []
             vm_devices = []
@@ -1083,9 +1292,7 @@ class VSphereNodeDriver(NodeDriver):
                 device_info = disk.deviceInfo
                 if not backing:
                     continue
-                file_path = self.ex_file_name_to_path(
-                    name=backing.fileName,
-                    datastores_info=datastores_info)
+                file_path = self.ex_file_name_to_path(name=backing.fileName)
                 disk_info = _VMDiskInfo(
                     disk_id=disk.diskObjectId,
                     owner_id=vm_id,
@@ -1102,7 +1309,7 @@ class VSphereNodeDriver(NodeDriver):
                     disk_info.scsi_target = disk.controllerKey
                     disk_info.scsi_lun = disk.unitNumber
                 disks_info.append(disk_info)
-            return disks_info
+            return process_fn(disks_info) if process_fn else disks_info
 
         if virtual_machine is not None:
             config = virtual_machine.config
@@ -1119,6 +1326,7 @@ class VSphereNodeDriver(NodeDriver):
             path_set=[
                 'config.hardware.device',
             ],
+            container=datacenter,
             process_fn=result_to_disks,
         )
 
@@ -1137,49 +1345,45 @@ class VSphereNodeDriver(NodeDriver):
         :param vm_properties: VM properties.
         :type vm_properties: dict
         """
-        if vm_properties is None:
-            vm_properties = {}
-        try:
-            datastore_url = vm_properties.get(
-                'config.datastoreUrl',
-                vm_entity.config.datastoreUrl)
-        except AttributeError:
-            # If there's no config and consequently datastoreUrl, it means
-            # the VM is still preparing, or is almost removed.
-            # In that case we don't need it.
-            return None
-
-        summary = vm_properties.get('summary') or vm_entity.summary
-        config = vm_properties.get('summary.config') or summary.config
-        runtime = vm_properties.get('summary.runtime') or summary.runtime
-        guest = vm_properties.get('summary.guest') or summary.guest
+        if vm_properties is not None:
+            datastore_url = vm_properties.get('config.datastoreUrl')
+            summary = vm_properties.get('summary')
+            config = vm_properties.get('summary.config')
+            runtime = vm_properties.get('summary.runtime')
+            guest = vm_properties.get('summary.guest')
+        else:
+            datastore_url = getattr(vm_entity.config, 'datastoreUrl', None)
+            summary = vm_entity.summary
+            config = summary.config
+            runtime = summary.runtime
+            guest = summary.guest
 
         extra = {
-            'uuid': config.uuid,
-            'instance_uuid': config.instanceUuid,
-            'path': config.vmPathName,
-            'guest_id': config.guestId,
-            'template': config.template,
-            'overall_status': str(summary.overallStatus),
-            'operating_system': config.guestFullName,
-            'cpus': config.numCpu,
-            'memory_mb': config.memorySizeMB,
+            'uuid': getattr(config, 'uuid', None),
+            'instance_uuid': getattr(config, 'instanceUuid', None),
+            'path': getattr(config, 'vmPathName', None),
+            'guest_id': getattr(config, 'guestId', None),
+            'template': getattr(config, 'template', None),
+            'overall_status': getattr(summary, 'overallStatus', None),
+            'operating_system': getattr(config, 'guestFullName', None),
+            'cpus': getattr(config, 'numCpu', None),
+            'memory_mb': getattr(config, 'memorySizeMB', None),
             'boot_time': None,
             'annotation': None,
             'datacenter': self._get_datacenter_id_by_url(datastore_url),
         }
 
-        boot_time = runtime.bootTime
+        boot_time = getattr(runtime, 'bootTime', None)
         if boot_time:
             extra['boot_time'] = boot_time.isoformat()
 
-        annotation = config.annotation
+        annotation = getattr(config, 'annotation', None)
         if annotation:
             extra['annotation'] = annotation
 
         public_ips = []
         private_ips = []
-        if guest is not None and guest.ipAddress is not None:
+        if getattr(guest, 'ipAddress', None):
             ip_addr = u'{}'.format(guest.ipAddress)
             if networking.is_valid_ipv4_address(ip_addr):
                 if networking.is_public_subnet(ip_addr):
@@ -1188,7 +1392,7 @@ class VSphereNodeDriver(NodeDriver):
                     private_ips.append(ip_addr)
 
         state = self.NODE_STATE_MAP.get(
-            runtime.powerState,
+            getattr(runtime, 'powerState', None),
             NodeState.UNKNOWN)
 
         node = Node(
@@ -1205,23 +1409,16 @@ class VSphereNodeDriver(NodeDriver):
         """
         Creates :class:`NodeImage` object from :class:`vim.VirtualMachine`.
         """
-        if vm_properties is None:
-            vm_properties = {}
-        try:
-            datastore_url = vm_properties.get(
-                'config.datastoreUrl',
-                vm_entity.config.datastoreUrl)
-        except AttributeError:
-            # If there's no config and consequently datastoreUrl, it means
-            # the image is still preparing, or is almost removed.
-            # In that case we don't need it.
-            return None
-
-        config = vm_properties.get('summary.config') or vm_entity.summary.config
+        if vm_properties is not None:
+            datastore_url = vm_properties.get('config.datastoreUrl')
+            config = vm_properties.get('summary.config')
+        else:
+            datastore_url = getattr(vm_entity.config, 'datastoreUrl', None)
+            config = vm_entity.summary.config
 
         return NodeImage(
-            id=config.uuid,
-            name=config.name,
+            id=getattr(config, 'uuid', None),
+            name=getattr(config, 'name', None),
             extra={
                 # pylint: disable=protected-access
                 'managed_object_id': vm_entity._GetMoId(),
@@ -1229,7 +1426,7 @@ class VSphereNodeDriver(NodeDriver):
             },
             driver=self)
 
-    def _to_volume(self, file_info, devices=None):
+    def _to_volume(self, file_info):
         """
         Creates :class:`StorageVolume` object from :class:`_FileInfo`.
 
@@ -1241,10 +1438,8 @@ class VSphereNodeDriver(NodeDriver):
          - created_at: ``None`` | :class:`datetime.datetime`
          - devices: ``dict[str, list[dict]]``
 
-        :param file_info: The VMDK file.
+        :param file_info: The VMDK file info.
         :type file_info: :class:`_FileInfo`.
-        :param devices: The list of attached devices.
-        :type devices: list[:class:`_VMDiskInfo`]
 
         :raise :class:`LibcloudError`: When creating volume with multiple
             non-shared devices.
@@ -1252,10 +1447,10 @@ class VSphereNodeDriver(NodeDriver):
 
         :rtype: :class:`StorageVolume`
         """
-        devices = devices or []
-        if len(devices) > 1 \
-                and not all(device.sharing is True for device in devices):
-            disks_ids = [device.disk_id for device in devices]
+        if len(file_info.devices) > 1 and not all(
+                device.sharing is True
+                for device in file_info.devices):
+            disks_ids = [device.disk_id for device in file_info.devices]
             raise LibcloudError((
                 "Unable to create StorageVolume with multiple non-shared "
                 "devices: {}."
@@ -1268,7 +1463,7 @@ class VSphereNodeDriver(NodeDriver):
             'devices': collections.defaultdict(list),
             'datacenter': self._get_datacenter_id_by_url(file_info.path)
         }
-        for device in devices:
+        for device in file_info.devices:
             extra['devices'][device.owner_id].append(device.__dict__)
 
         return StorageVolume(
