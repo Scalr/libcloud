@@ -44,7 +44,6 @@ from libcloud.utils.py3 import urlparse
 
 try:
     from pyVim import connect
-    from pyVmomi import vmodl
     from pyVmomi import vim
     from pyVmomi import vmodl
 except ImportError:  # pragma: no cover
@@ -1536,3 +1535,8 @@ class VSphereNodeDriver(NodeDriver):
             extra=extra,
             created=snapshot_tree.createTime,
             state=None)
+
+    def ex_list_custom_fields(self):
+        """Returns custom fields
+        """
+        return self.connection.content.customFieldsManager.field
