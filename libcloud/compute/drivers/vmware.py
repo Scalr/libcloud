@@ -18,7 +18,6 @@ VMware vSphere driver using pyvmomi - https://github.com/vmware/pyvmomi
 """
 import atexit
 import collections
-import functools
 import logging
 import os
 import re
@@ -962,30 +961,39 @@ class VSphereNodeDriver(NodeDriver):
             ).format(datacenter_id, ', '.join(datacenter_ids.keys())))
         return datacenter_ids[datacenter_id]
 
-    @functools.lru_cache()
     def _get_datastores_info_map(self):
         """
         Returns the datastore info to datacenter map.
 
         See: https://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.VmfsDatastoreInfo.html
 
+        Note: This method is used during iteration in `self.iter_*` methods,
+            so the result will be cached ignoring `self._allow_caching` option.
+
         :rtype: dict[:class:`vim.VmfsDatastoreInfo`, :class:`vim.Datacenter`]
         """
-        return {
-            datastore.info: datacenter
-            for datacenter in self.ex_list_datacenters()
-            for datastore in datacenter.datastore}
+        if 'datastores_info_map' not in self._cache:
+            self._cache['datastores_info_map'] = {
+                datastore.info: datacenter
+                for datacenter in self.ex_list_datacenters()
+                for datastore in datacenter.datastore}
+        return self._cache['datastores_info_map']
 
-    @functools.lru_cache()
     def _get_datacenter_ids_map(self):
         """
         Returns the datacenter ID to datacenter object map.
 
+        Note: This method is used during iteration in `self.iter_*` methods,
+            so the result will be cached ignoring `self._allow_caching` option.
+
         :rtype: dict[str, :class:`vim.Datacenter`]
         """
-        return {
-            datacenter._moId: datacenter
-            for datacenter in self.ex_list_datacenters()}
+        if 'datacenter_ids_map' not in self._cache:
+            # pylint: disable=protected-access
+            self._cache['datacenter_ids_map'] = {
+                datacenter._moId: datacenter
+                for datacenter in self.ex_list_datacenters()}
+        return self._cache['datacenter_ids_map']
 
     def _get_datacenter_id_by_url(self, url):
         """
