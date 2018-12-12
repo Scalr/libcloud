@@ -39,7 +39,6 @@ from libcloud.compute.types import NodeState
 from libcloud.compute.types import Provider
 from libcloud.utils import misc as misc_utils
 from libcloud.utils import networking
-from libcloud.utils.py3 import urlparse
 
 try:
     from pyVim import connect
@@ -538,57 +537,78 @@ class VSphereConnection(ConnectionUserAndKey):
             processes, it is better to call the :meth:`disconnect` manually.
         :type disconnect_on_terminate: bool, optional
         """
-        if host and url:
-            raise ValueError('host and url arguments are mutually exclusive.')
-        if not host and not url:
-            raise ValueError('Either host or url argument is required.')
-
-        if url:
-            host = urlparse.urlparse(url).netloc
+        if url is not None:
+            if host is not None or port is not None:
+                raise ValueError(
+                    "'url' and 'host'/'port' arguments are mutually "
+                    "exclusive.")
+            host, port, secure, sdk_path = self._tuple_from_url(url)
+        else:
+            sdk_path = None
         if not host:
-            raise ValueError('Either "host" or "url" argument must be '
-                             'provided')
+            raise ValueError(
+                "Either 'host' or 'url argument must be provided.")
 
+        self._sdk_path = sdk_path or '/sdk'
         self._disconnect_on_terminate = disconnect_on_terminate
-        self.client = None
+        self.client = None  # type: tp.Optional[vim.ServiceInstance]
         self.content = None  # type: tp.Optional[vim.ServiceInstanceContent]
+
         super(VSphereConnection, self).__init__(
             user_id=user_id,
             key=key, secure=secure,
             host=host, port=port,
             timeout=timeout, **kwargs)
 
-    def connect(self, **kwargs):
-        kwargs.pop('secure', None)
-        kwargs.pop('timeout', None)
-        kwargs.pop('proxy_url', None)
-        kwargs.pop('retry_delay', None)
-        kwargs.pop('backoff', None)
-        if 'host' not in kwargs:
-            kwargs['host'] = self.host
-        if 'user' not in kwargs:
-            kwargs['user'] = self.user_id
-        if 'pwd' not in kwargs:
-            kwargs['pwd'] = self.key
-        if 'sslContext' not in kwargs:
-            kwargs['sslContext'] = ssl._create_unverified_context()
+    def connect(self, host=None, port=None, base_url=None, **kwargs):
+        """
+        Establish a connection with the API server.
+
+        :param str host: Optional host to override our default.
+        :param int port: Optional port to override our default.
+        :param str base_url: Optional URL to override our default.
+        """
+        if base_url is not None:
+            host, port, secure, path = self._tuple_from_url(base_url)
+        else:
+            host = host or self.host
+            port = port or self.port
+            secure, path = self.secure, self._sdk_path
+
+        protocol = 'https' if secure else 'http'
+        vcenter_url = '{}://{}:{}{}'.format(protocol, host, port, path)
+        LOG.debug("Creating the vSphere (%s) session ...", vcenter_url)
 
         try:
-            self.client = connect.SmartConnect(**kwargs)
+            self.client = connect.SmartConnect(
+                protocol=protocol,
+                host=host,
+                port=port,
+                user=self.user_id,
+                pwd=self.key,
+                path=path,
+                sslContext=ssl._create_unverified_context())
             self.content = self.client.RetrieveContent()
             connect.SetSi(None)  # removes connection object from the global scope
-        except Exception as e:
-            message = '{}'.format(e)
+        except Exception as err:
+            message = '{}'.format(err)
+
             if 'incorrect user name' in message:
                 raise InvalidCredsError(
                     "Check that your username and password are valid.")
             if 'connection refused' in message or 'not a vim server' in message:
-                raise LibcloudError(
-                    "Check that the host provided is a vSphere installation.")
+                raise LibcloudError((
+                    "Check that the host provided ({0}) is a vSphere "
+                    "installation."
+                ).format(vcenter_url))
             if 'name or service not known' in message:
-                raise LibcloudError(
-                    "Check that the vSphere host is accessible.")
-            raise LibcloudError(message)
+                raise LibcloudError((
+                    "Check that the vSphere ({0}) is accessible."
+                ).format(vcenter_url))
+
+            raise LibcloudError((
+                "Unable to create the vSphere ({0}) session: {1}"
+            ).format(vcenter_url, message))
 
         if self._disconnect_on_terminate:
             atexit.register(self.disconnect)
