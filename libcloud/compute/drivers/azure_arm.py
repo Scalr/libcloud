@@ -42,7 +42,7 @@ from libcloud.utils import misc as misc_utils
 from libcloud.utils.py3 import basestring
 from libcloud.utils import iso8601
 
-RESOURCE_API_VERSION = '2018-04-01'
+RESOURCE_API_VERSION = '2018-06-01'
 NIC_API_VERSION = '2016-09-01'
 CONSUMPTION_API_VERSION = '2018-06-30'
 
