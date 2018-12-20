@@ -860,7 +860,7 @@ class AzureNodeDriver(NodeDriver):
         }
 
         if ex_sku_name is not None:
-            data['ex_sku'] = {'name': ex_sku_name}
+            data['sku'] = {'name': ex_sku_name}
 
         response = self.connection.request(
             action,
