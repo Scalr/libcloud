@@ -797,7 +797,7 @@ class AzureNodeDriver(NodeDriver):
         return True
 
     def create_volume(self, size, name, location=None, snapshot=None,
-                      ex_resource_group=None,
+                      ex_sku=None, ex_resource_group=None,
                       ex_tags=None):
         """
         Create a new managed volume.
@@ -813,6 +813,10 @@ class AzureNodeDriver(NodeDriver):
 
         :param snapshot: Snapshot from which to create the new volume.
         :type snapshot: :class:`VolumeSnapshot`
+
+        :param ex_sku: The disks sku name. Can be either "Standard_LRS",
+            "Premium_LRS", "StandardSSD_LRS", or "UltraSSD_LRS".
+        :type ex_sku: ``str``
 
         :param ex_resource_group: The name of resource group in which to
             create the volume. (required)
@@ -854,6 +858,9 @@ class AzureNodeDriver(NodeDriver):
                 'diskSizeGB': size
             }
         }
+
+        if ex_sku is not None:
+            data['ex_sku'] = {'name': ex_sku}
 
         response = self.connection.request(
             action,
