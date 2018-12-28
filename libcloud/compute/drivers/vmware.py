@@ -1569,6 +1569,8 @@ class VSphereNodeDriver(NodeDriver):
         """
         custom_fields = {}
         for field_def in self.connection.content.customFieldsManager.field:
+            if field_def.managedObjectType is None:
+                continue
             object_type = field_def.managedObjectType.__name__.rsplit('vim.')[-1]
             custom_fields.setdefault(object_type, {})
             custom_fields[object_type][field_def.key] = field_def.name
