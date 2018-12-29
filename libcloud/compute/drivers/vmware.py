@@ -42,7 +42,6 @@ from libcloud.utils import networking
 
 try:
     from pyVim import connect
-    from pyVmomi import vmodl
     from pyVmomi import vim
     from pyVmomi import vmodl
 except ImportError:  # pragma: no cover
@@ -1399,6 +1398,8 @@ class VSphereNodeDriver(NodeDriver):
             'boot_time': None,
             'annotation': None,
             'datacenter': self._get_datacenter_id_by_url(datastore_url),
+            'custom_value': {v.key: v.value
+                    for v in getattr(vm_properties['summary'], 'customValue', {})}
         }
 
         boot_time = getattr(runtime, 'bootTime', None)
@@ -1562,3 +1563,15 @@ class VSphereNodeDriver(NodeDriver):
             extra=extra,
             created=snapshot_tree.createTime,
             state=None)
+
+    def ex_list_custom_fields(self):
+        """Returns custom fields
+        """
+        custom_fields = {}
+        for field_def in self.connection.content.customFieldsManager.field:
+            if field_def.managedObjectType is None:
+                continue
+            object_type = field_def.managedObjectType.__name__.rsplit('vim.')[-1]
+            custom_fields.setdefault(object_type, {})
+            custom_fields[object_type][field_def.key] = field_def.name
+        return custom_fields
