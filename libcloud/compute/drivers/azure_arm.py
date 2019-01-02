@@ -1163,6 +1163,7 @@ class AzureNodeDriver(NodeDriver):
         volume_name = volume_obj.get('name')
         extra = dict(volume_obj)
         properties = extra['properties']
+        properties['managedBy'] = extra.get('managedBy')
         size = properties.get('diskSizeGB')
         if size is not None:
             size = int(size)
