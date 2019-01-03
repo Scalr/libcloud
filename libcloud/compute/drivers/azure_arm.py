@@ -42,7 +42,7 @@ from libcloud.utils import misc as misc_utils
 from libcloud.utils.py3 import basestring
 from libcloud.utils import iso8601
 
-RESOURCE_API_VERSION = '2016-04-30-preview'
+RESOURCE_API_VERSION = '2018-06-01'
 NIC_API_VERSION = '2016-09-01'
 CONSUMPTION_API_VERSION = '2018-06-30'
 
@@ -797,7 +797,7 @@ class AzureNodeDriver(NodeDriver):
         return True
 
     def create_volume(self, size, name, location=None, snapshot=None,
-                      ex_resource_group=None, ex_account_type=None,
+                      ex_sku_name=None, ex_resource_group=None,
                       ex_tags=None):
         """
         Create a new managed volume.
@@ -814,13 +814,13 @@ class AzureNodeDriver(NodeDriver):
         :param snapshot: Snapshot from which to create the new volume.
         :type snapshot: :class:`VolumeSnapshot`
 
+        :param ex_sku_name: The disks sku name. Can be either "Standard_LRS",
+            "Premium_LRS", "StandardSSD_LRS", or "UltraSSD_LRS".
+        :type ex_sku_name: ``str``
+
         :param ex_resource_group: The name of resource group in which to
             create the volume. (required)
         :type ex_resource_group: ``str``
-
-        :param ex_account_type: The Storage Account type,
-            ``Standard_LRS``(HDD disks) or ``Premium_LRS``(SSD disks).
-        :type ex_account_type: ``str``
 
         :param ex_tags: Optional tags to associate with this resource.
         :type ex_tags: ``dict``
@@ -858,8 +858,9 @@ class AzureNodeDriver(NodeDriver):
                 'diskSizeGB': size
             }
         }
-        if ex_account_type is not None:
-            data['properties']['accountType'] = ex_account_type
+
+        if ex_sku_name is not None:
+            data['sku'] = {'name': ex_sku_name}
 
         response = self.connection.request(
             action,
@@ -1162,6 +1163,7 @@ class AzureNodeDriver(NodeDriver):
         volume_name = volume_obj.get('name')
         extra = dict(volume_obj)
         properties = extra['properties']
+        properties['managedBy'] = extra.get('managedBy')
         size = properties.get('diskSizeGB')
         if size is not None:
             size = int(size)
