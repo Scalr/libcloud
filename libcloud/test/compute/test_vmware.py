@@ -94,11 +94,7 @@ class VSpherePropertyCollectorTests(test.LibcloudTestCase):
     def setUp(self):
         self.property_collector = mock.MagicMock()
         self.content = mock.Mock(propertyCollector=self.property_collector)
-        self.driver = mock.Mock(
-            connection=mock.Mock(
-                client=mock.Mock(
-                    RetrieveContent=mock.Mock(return_value=self.content))
-                ))
+        self.driver = mock.Mock(connection=mock.Mock(content=self.content))
 
     def tearDown(self):
         self.property_collector = None
@@ -151,7 +147,7 @@ class VSpherePropertyCollectorTests(test.LibcloudTestCase):
         ]
 
         objects = list(vmware.VSpherePropertyCollector(
-            self.driver, mock.Mock(),
+            self.driver, mock.Mock(__name__='ManagedEntity'),
             path_set=['config'],
             process_fn=process_fn,
         ))
@@ -177,8 +173,6 @@ class VSphereConnectionTests(test.LibcloudTestCase):
                 'test-user', 'test-password',
                 url='https://test-vcenter.host',
                 host='test-vcenter.host')
-        with self.assertRaises(ValueError):
-            vmware.VSphereConnection('test-user', 'test-password', url='http')
 
     @mock.patch.object(vmware, 'connect')
     @mock.patch.object(vmware.ssl, '_create_unverified_context')
@@ -190,9 +184,12 @@ class VSphereConnectionTests(test.LibcloudTestCase):
         connection.connect()
 
         connect_fn.SmartConnect.assert_called_once_with(
-            user='test-user',
+            protocol='https',
             host='test-vcenter.host',
+            port=443,
+            user='test-user',
             pwd='test-password',
+            path='/sdk',
             sslContext=create_context_fn.return_value)
 
     @mock.patch.object(vmware, 'connect')
@@ -212,9 +209,10 @@ class VSphereConnectionTests(test.LibcloudTestCase):
 
         with self.assertRaises(common_types.LibcloudError) as ctx:
             conn.connect()
-        self.assertEqual(
-            ctx.exception.value,
-            "Check that the host provided is a vSphere installation.")
+        err_msg = \
+            "Check that the host provided (http://url.com:80/sdk) is a " \
+            "vSphere installation."
+        self.assertEqual(ctx.exception.value, err_msg)
 
     @mock.patch.object(vmware, 'connect')
     def test_connect_to_unknown_host(self, connect_fn):
@@ -226,7 +224,7 @@ class VSphereConnectionTests(test.LibcloudTestCase):
             conn.connect()
         self.assertEqual(
             ctx.exception.value,
-            "Check that the vSphere host is accessible.")
+            "Check that the vSphere (http://url.com:80/sdk) is accessible.")
 
 
 @mock.patch(
@@ -577,7 +575,8 @@ class VSphereNodeDriverTests(test.LibcloudTestCase):
                 ),
                 guest=create_mock(
                     ipAddress='192.168.0.1',
-                )
+                ),
+                customValue=[mock.Mock(key='custom-key', value='custom-value')]
             ))
         PropertyCollectorMock.set_objects(vm)
         self.driver._query_node_creation_times = create_mock(return_value={
@@ -605,6 +604,7 @@ class VSphereNodeDriverTests(test.LibcloudTestCase):
             'boot_time': boot_time.isoformat(),
             'annotation': 'annotation-text',
             'datacenter': None,
+            'custom_value': {'custom-key': 'custom-value'},
         })
         self.assertEqual(nodes[0].created_at, create_time)
 
@@ -790,7 +790,8 @@ class VSphereNodeDriverTests(test.LibcloudTestCase):
             ),
             guest=create_mock(
                 ipAddress=None,
-            ))
+            ),
+            customValue=[])
         return create_mock(
             cls=PyVmomiTypes.VirtualMachine,
             _GetMoId=lambda: vm_id,
