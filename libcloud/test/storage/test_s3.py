@@ -41,6 +41,7 @@ from libcloud.storage.drivers.s3 import S3StorageDriver, S3USWestStorageDriver
 from libcloud.storage.drivers.s3 import S3EUWestStorageDriver
 from libcloud.storage.drivers.s3 import S3APSEStorageDriver
 from libcloud.storage.drivers.s3 import S3APNEStorageDriver
+from libcloud.storage.drivers.s3 import S3EUNorthStorageDriver
 from libcloud.storage.drivers.s3 import CHUNK_SIZE
 from libcloud.utils.py3 import b
 
@@ -958,6 +959,10 @@ class S3APSETests(S3Tests):
 
 class S3APNETests(S3Tests):
     driver_type = S3APNEStorageDriver
+
+
+class S3EUNorthTests(S3Tests):
+    driver_type = S3EUNorthStorageDriver
 
 
 if __name__ == '__main__':

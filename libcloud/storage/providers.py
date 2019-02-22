@@ -43,6 +43,8 @@ DRIVERS = {
     ('libcloud.storage.drivers.s3', 'S3EUWest2StorageDriver'),
     Provider.S3_EU_CENTRAL:
     ('libcloud.storage.drivers.s3', 'S3EUCentralStorageDriver'),
+    Provider.S3_EU_NORTH:
+    ('libcloud.storage.drivers.s3', 'S3EUNorthStorageDriver'),
     Provider.S3_AP_SOUTH:
     ('libcloud.storage.drivers.s3', 'S3APSouthStorageDriver'),
     Provider.S3_AP_SOUTHEAST:

@@ -70,6 +70,7 @@ S3_AP_NORTHEAST_HOST = S3_AP_NORTHEAST1_HOST
 S3_SA_EAST_HOST = 's3-sa-east-1.amazonaws.com'
 S3_SA_SOUTHEAST2_HOST = 's3-sa-east-2.amazonaws.com'
 S3_CA_CENTRAL_HOST = 's3-ca-central-1.amazonaws.com'
+S3_EU_NORTH_HOST = 's3-eu-north-1.amazonaws.com'
 
 API_VERSION = '2006-03-01'
 NAMESPACE = 'http://s3.amazonaws.com/doc/%s/' % (API_VERSION)
@@ -1169,3 +1170,14 @@ class S3CACentralStorageDriver(S3StorageDriver):
     connectionCls = S3CACentralConnection
     ex_location_name = 'ca-central-1'
     region_name = 'ca-central-1'
+
+
+class S3EUNorthConnection(S3SignatureV4Connection):
+    host = S3_EU_NORTH_HOST
+
+
+class S3EUNorthStorageDriver(S3StorageDriver):
+    name = 'Amazon S3 (eu-north-1)'
+    connectionCls = S3EUNorthConnection
+    ex_location_name = 'eu-north-1'
+    region_name = 'eu-north-1'
