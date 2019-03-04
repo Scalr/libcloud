@@ -1398,8 +1398,10 @@ class VSphereNodeDriver(NodeDriver):
             'boot_time': None,
             'annotation': None,
             'datacenter': self._get_datacenter_id_by_url(datastore_url),
-            'custom_value': {v.key: v.value
-                    for v in getattr(vm_properties['summary'], 'customValue', {})}
+            'custom_value': {
+                item.key: item.value
+                for item in getattr(summary, 'customValue', {})
+            }
         }
 
         boot_time = getattr(runtime, 'bootTime', None)

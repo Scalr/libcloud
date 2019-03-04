@@ -364,6 +364,16 @@ INSTANCE_TYPES = {
             'cpu': 96
         }
     },
+    'm5.metal': {
+        'id': 'm5.metal',
+        'name': 'M5 General Purpose Metal',
+        'ram': GiB(384),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 96
+        }
+    },
     'cg1.4xlarge': {
         'id': 'cg1.4xlarge',
         'name': 'Cluster GPU Quadruple Extra Large Instance',
@@ -1011,7 +1021,352 @@ INSTANCE_TYPES = {
         'extra': {
             'cpu': 128
         }
-    }
+    },
+    # T3 instances
+    't3.nano': {
+        'id': 't3.nano',
+        'name': 'T3 Nano',
+        'ram': GiB(0.5),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    't3.micro': {
+        'id': 't3.micro',
+        'name': 'T3 Micro',
+        'ram': GiB(1),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    't3.small': {
+        'id': 't3.small',
+        'name': 'T3 Small',
+        'ram': GiB(2),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    't3.medium': {
+        'id': 't3.medium',
+        'name': 'T3 Medium',
+        'ram': GiB(4),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    't3.large': {
+        'id': 't3.large',
+        'name': 'T3 Large',
+        'ram': GiB(8),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    't3.xlarge': {
+        'id': 't3.xlarge',
+        'name': 'T3 Extra Large',
+        'ram': GiB(16),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 4
+        }
+    },
+    't3.2xlarge': {
+        'id': 't3.2xlarge',
+        'name': 'T3 Double Extra Large',
+        'ram': GiB(32),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 8
+        }
+    },
+    # M5D instances
+    'm5d.large': {
+        'id': 'm5d.large',
+        'name': 'M5 General Purpose Large',
+        'ram': GiB(8),
+        'disk': 75,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    'm5d.xlarge': {
+        'id': 'm5d.xlarge',
+        'name': 'M5 General Purpose Large',
+        'ram': GiB(16),
+        'disk': 150,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 4
+        }
+    },
+    'm5d.2xlarge': {
+        'id': 'm5d.2xlarge',
+        'name': 'M5 General Purpose Double Extra Large',
+        'ram': GiB(32),
+        'disk': 300,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 8
+        }
+    },
+    'm5d.4xlarge': {
+        'id': 'm5d.4xlarge',
+        'name': 'M5 General Purpose Quadruple Extra Large',
+        'ram': GiB(64),
+        'disk': '2 * 300',
+        'bandwidth': None,
+        'extra': {
+            'cpu': 16
+        }
+    },
+    'm5d.12xlarge': {
+        'id': 'm5d.12xlarge',
+        'name': 'M5 General Purpose 12xlarge',
+        'ram': GiB(192),
+        'disk': 2 * 900,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 48
+        }
+    },
+    'm5d.24xlarge': {
+        'id': 'm5d.24xlarge',
+        'name': 'M5 General Purpose 24xlarge',
+        'ram': GiB(384),
+        'disk': 4 * 900,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 96
+        }
+    },
+    'm5d.metal': {
+        'id': 'm5d.metal',
+        'name': 'M5 General Purpose Metal',
+        'ram': GiB(384),
+        'disk': 4 * 900,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 96
+        }
+    },
+    # C5D instances
+    'c5d.large': {
+        'id': 'c5d.large',
+        'name': 'C5 High-CPU Large',
+        'ram': GiB(4),
+        'disk': 50,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    'c5d.xlarge': {
+        'id': 'c5d.xlarge',
+        'name': 'C5 High-CPU Extra Large',
+        'ram': GiB(8),
+        'disk': 100,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 4
+        }
+    },
+    'c5d.2xlarge': {
+        'id': 'c5d.2xlarge',
+        'name': 'C5 High-CPU Double Extra Large',
+        'ram': GiB(16),
+        'disk': 200,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 8
+        }
+    },
+    'c5d.4xlarge': {
+        'id': 'c5d.4xlarge',
+        'name': 'C5 High-CPU Quadruple Extra Large',
+        'ram': GiB(32),
+        'disk': 400,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 16
+        }
+    },
+    'c5d.9xlarge': {
+        'id': 'c5d.9xlarge',
+        'name': 'C5 High-CPU 9xlarge',
+        'ram': GiB(72),
+        'disk': 900,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 36
+        }
+    },
+    'c5d.18xlarge': {
+        'id': 'c5d.18xlarge',
+        'name': 'C5 High-CPU 18xlarge',
+        'ram': GiB(144),
+        'disk': 2 * 900,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 72
+        }
+    },
+    # R5 instances
+    'r5.large': {
+        'id': 'r5.large',
+        'name': 'R5 Large',
+        'ram': GiB(16),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    'r5.xlarge': {
+        'id': 'r5.xlarge',
+        'name': 'R5 Extra Large',
+        'ram': GiB(32),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 4
+        }
+    },
+    'r5.2xlarge': {
+        'id': 'r5.2xlarge',
+        'name': 'R5 Double Extra Large',
+        'ram': GiB(64),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 8
+        }
+    },
+    'r5.4xlarge': {
+        'id': 'r5.4xlarge',
+        'name': 'R5 Quadruple Extra Large',
+        'ram': GiB(128),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 16
+        }
+    },
+    'r5.12xlarge': {
+        'id': 'r5.12xlarge',
+        'name': '',
+        'ram': GiB(384),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 48
+        }
+    },
+    'r5.24xlarge': {
+        'id': 'r5.24xlarge',
+        'name': 'R5 12xlarge',
+        'ram': GiB(768),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 96
+        }
+    },
+    'r5.metal': {
+        'id': 'r5.metal',
+        'name': 'R5 Metal',
+        'ram': GiB(768),
+        'disk': 0,  # EBS only
+        'bandwidth': None,
+        'extra': {
+            'cpu': 96
+        }
+    },
+    # R5D instances
+    'r5d.large': {
+        'id': 'r5d.large',
+        'name': 'R5D Large',
+        'ram': GiB(16),
+        'disk': 75,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 2
+        }
+    },
+    'r5d.xlarge': {
+        'id': 'r5d.xlarge',
+        'name': 'R5D Extra Large',
+        'ram': GiB(32),
+        'disk': 1 * 150,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 4
+        }
+    },
+    'r5d.2xlarge': {
+        'id': 'r5d.2xlarge',
+        'name': 'R5D Double Extra Large',
+        'ram': GiB(64),
+        'disk': 300,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 8
+        }
+    },
+    'r5d.4xlarge': {
+        'id': 'r5d.4xlarge',
+        'name': 'R5D Quadruple Extra Large',
+        'ram': GiB(128),
+        'disk': 2 * 300,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 16
+        }
+    },
+    'r5d.12xlarge': {
+        'id': 'r5d.12xlarge',
+        'name': 'R5D 12xlarge',
+        'ram': GiB(384),
+        'disk': 2 * 900,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 48
+        }
+    },
+    'r5d.24xlarge': {
+        'id': 'r5d.24xlarge',
+        'name': 'R5D 24xlarge',
+        'ram': GiB(768),
+        'disk': 4 * 900,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 96
+        }
+    },
+    'r5d.metal': {
+        'id': 'r5d.metal',
+        'name': 'R5D Metal',
+        'ram': GiB(768),
+        'disk': 4 * 900,
+        'bandwidth': None,
+        'extra': {
+            'cpu': 96
+        }
+    },
 }
 
 #  From <https://aws.amazon.com/marketplace/help/200777880>
@@ -1685,6 +2040,72 @@ REGION_DETAILS = {
             'x1.16xlarge',
             'x1.32xlarge',
             'x1e.32xlarge',
+        ]
+    },
+    # EU (Stockholm) Region
+    'eu-north-1': {
+        'endpoint': 'ec2.eu-north-1.amazonaws.com',
+        'api_name': 'ec2_eu_north',
+        'country': 'Stockholm',
+        'signature_version': '4',
+        'instance_types': [
+            't3.nano',
+            't3.micro',
+            't3.small',
+            't3.medium',
+            't3.large',
+            't3.xlarge',
+            't3.2xlarge',
+            'm5d.large',
+            'm5d.xlarge',
+            'm5d.2xlarge',
+            'm5d.4xlarge',
+            'm5d.12xlarge',
+            'm5d.24xlarge',
+            'm5.large',
+            'm5.xlarge',
+            'm5.2xlarge',
+            'm5.4xlarge',
+            'm5.12xlarge',
+            'm5.24xlarge',
+            'm5.metal',
+            'm5d.metal',
+            'c5d.large',
+            'c5d.xlarge',
+            'c5d.2xlarge',
+            'c5d.4xlarge',
+            'c5d.9xlarge',
+            'c5d.18xlarge',
+            'c5.large',
+            'c5.xlarge',
+            'c5.2xlarge',
+            'c5.4xlarge',
+            'c5.9xlarge',
+            'c5.18xlarge',
+            'r5d.large',
+            'r5d.xlarge',
+            'r5d.2xlarge',
+            'r5d.4xlarge',
+            'r5d.12xlarge',
+            'r5d.24xlarge',
+            'r5d.metal',
+            'r5.large',
+            'r5.xlarge',
+            'r5.2xlarge',
+            'r5.4xlarge',
+            'r5.12xlarge',
+            'r5.24xlarge',
+            'r5.metal',
+            'd2.xlarge',
+            'd2.2xlarge',
+            'd2.4xlarge',
+            'd2.8xlarge',
+            'i3.large',
+            'i3.xlarge',
+            'i3.2xlarge',
+            'i3.4xlarge',
+            'i3.8xlarge',
+            'i3.16xlarge',
         ]
     },
     # Asia Pacific (Mumbai, India) Region
