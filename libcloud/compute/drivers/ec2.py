@@ -26,7 +26,9 @@ import warnings
 import time
 
 from libcloud.utils import misc as misc_utils
+from libcloud.utils.py3 import ET
 from libcloud.utils.py3 import b, basestring, ensure_string
+
 from libcloud.utils.xml import fixxpath, findtext, findattr, findall
 from libcloud.utils.publickey import get_pubkey_ssh2_fingerprint
 from libcloud.utils.publickey import get_pubkey_comment
@@ -43,6 +45,7 @@ from libcloud.compute.base import NodeImage, StorageVolume, VolumeSnapshot
 from libcloud.compute.base import KeyPair, BaseDriver
 from libcloud.compute.types import NodeState, KeyPairDoesNotExistError, \
     StorageVolumeState, VolumeSnapshotState
+from libcloud.compute.constants import INSTANCE_TYPES, REGION_DETAILS
 
 __all__ = [
     'API_VERSION',
@@ -99,6 +102,18 @@ OUTSCALE_NAMESPACE = 'http://api.outscale.com/wsdl/fcuext/2014-04-15/'
 DEFAULT_EFS_API_VERSION = '2015-02-01'
 EFS_NAMESPACE = 'elasticfilesystem.%s.amazonaws.com'
 
+# Add Nimbus region
+REGION_DETAILS['nimbus'] = {
+    # Nimbus clouds have 3 EC2-style instance types but their particular
+    # RAM allocations are configured by the admin
+    'country': 'custom',
+    'signature_version': '2',
+    'instance_types': [
+        'm1.small',
+        'm1.large',
+        'm1.xlarge'
+    ]
+}
 
 """
 Sizes must be hardcoded, because Amazon doesn't provide an API to fetch them.
@@ -3868,10 +3883,11 @@ class EC2Response(AWSBaseResponse):
             raise InvalidCredsError(msg)
 
         try:
-            body = self.parse_body()
+            body = ET.XML(self.body)
         except:
             raise MalformedResponseError("Failed to parse XML",
                                          body=self.body, driver=EC2NodeDriver)
+
         for err in body.findall('Errors/Error'):
             code, message = err.getchildren()
             err_list.append('%s: %s' % (code.text, message.text))
@@ -4807,6 +4823,7 @@ class BaseEC2NodeDriver(NodeDriver):
         :return: The newly created volume.
         :rtype: :class:`StorageVolume`
         """
+
         params = {
             'Action': 'CreateVolume',
             'Size': str(size)}
@@ -4879,7 +4896,7 @@ class BaseEC2NodeDriver(NodeDriver):
         response = self.connection.request(self.path, params=params).object
         return self._get_boolean(response)
 
-    def create_volume_snapshot(self, volume, name=None):
+    def create_volume_snapshot(self, volume, name=None, ex_metadata=None):
         """
         Create snapshot from volume
 
@@ -4888,6 +4905,10 @@ class BaseEC2NodeDriver(NodeDriver):
 
         :param      name: Name of snapshot (optional)
         :type       name: ``str``
+
+        :keyword    ex_metadata: The Key/Value metadata to associate
+                                 with a snapshot (optional)
+        :type       ex_metadata: ``dict``
 
         :rtype: :class:`VolumeSnapshot`
         """
@@ -4900,11 +4921,15 @@ class BaseEC2NodeDriver(NodeDriver):
             params.update({
                 'Description': name,
             })
+        if ex_metadata is None:
+            ex_metadata = {}
+
         response = self.connection.request(self.path, params=params).object
         snapshot = self._to_snapshot(response, name)
 
-        if name and self.ex_create_tags(snapshot, {'Name': name}):
-            snapshot.extra['tags']['Name'] = name
+        ex_metadata.update(**{'Name': name} if name else {})
+        if self.ex_create_tags(snapshot, ex_metadata):
+            snapshot.extra['tags'] = ex_metadata
 
         return snapshot
 
@@ -5920,7 +5945,7 @@ class BaseEC2NodeDriver(NodeDriver):
 
     def ex_authorize_security_group_ingress(self, id, from_port, to_port,
                                             cidr_ips=None, group_pairs=None,
-                                            protocol='tcp'):
+                                            protocol='tcp', description=None):
         """
         Edit a Security Group to allow specific ingress traffic using
         CIDR blocks or either a group ID, group name or user ID (account).
@@ -5954,6 +5979,9 @@ class BaseEC2NodeDriver(NodeDriver):
         :param      protocol: tcp/udp/icmp
         :type       protocol: ``str``
 
+        :param      description: description to be added to the rules inserted
+        :type       description: ``str``
+
         :rtype: ``bool``
         """
 
@@ -5962,7 +5990,8 @@ class BaseEC2NodeDriver(NodeDriver):
                                                         from_port,
                                                         to_port,
                                                         cidr_ips,
-                                                        group_pairs)
+                                                        group_pairs,
+                                                        description)
 
         params["Action"] = 'AuthorizeSecurityGroupIngress'
 
@@ -7556,6 +7585,7 @@ class BaseEC2NodeDriver(NodeDriver):
             kwargs['signature_version'] = '4'
         else:
             kwargs['signature_version'] = self.signature_version
+
         return kwargs
 
     def _to_nodes(self, object, xpath):
@@ -8523,7 +8553,7 @@ class BaseEC2NodeDriver(NodeDriver):
 
     def _get_common_security_group_params(self, group_id, protocol,
                                           from_port, to_port, cidr_ips,
-                                          group_pairs):
+                                          group_pairs, description=None):
         """
         Return a dictionary with common query parameters which are used when
         operating on security groups.
@@ -8542,6 +8572,9 @@ class BaseEC2NodeDriver(NodeDriver):
 
                 ip_ranges['IpPermissions.1.IpRanges.%s.CidrIp'
                           % (index)] = cidr_ip
+                if description is not None:
+                    ip_ranges['IpPermissions.1.IpRanges.%s.Description'
+                              % (index)] = description
 
             params.update(ip_ranges)
 
@@ -9362,72 +9395,3 @@ class OutscaleINCNodeDriver(OutscaleNodeDriver):
             key=key, secret=secret, secure=secure, host=host, port=port,
             region=region, region_details=OUTSCALE_INC_REGION_DETAILS,
             **kwargs)
-
-
-class EFSConnection(SignedAWSConnection):
-    """
-    Represents a single connection to the Amazon EFS endpoint.
-    """
-
-    version = DEFAULT_EFS_API_VERSION
-    host = None
-    responseCls = AWSJsonResponse
-    service_name = 'elasticfilesystem'
-
-    def request(self, action, **kwargs):
-        action = os.path.join(self.version, action)
-        return super(EFSConnection, self).request(action, **kwargs)
-
-
-class EFSDriver(BaseDriver):
-    """
-    Implements Amazon Elastic File System API.
-
-    https://docs.aws.amazon.com/efs/latest/ug/api-reference.html
-    """
-
-    connectionCls = EFSConnection
-    name = 'Amazon EFS'
-    signature_version = '4'
-
-    def __init__(self, *args, **kwargs):
-        self.region_name = kwargs.get('region', 'us-east-1')
-        self.connectionCls.host = EFS_NAMESPACE % self.region_name
-        super(EFSDriver, self).__init__(*args, **kwargs)
-
-    def describe_mount_targets(self, file_system_id=None,
-                               mount_target_id=None):
-        """
-        Returns the descriptions of all the current mount
-        targets, or a specific mount target, for a file system.
-
-        :param file_system_id: ID of the file system whose mount
-            targets you want to list. It must be specified
-            if ``mount_target_id`` is not specified. (optional)
-        :type file_system_id: ``str``
-
-        :param mount_target_id: ID of the mount target that you want
-            to have described. It must be specified if ``file_system_id``
-            is not specified. (optional)
-        :type mount_target_id: ``str``
-
-        :return: Returns the file system's mount targets as an array.
-        :rtype: list[dict]
-        """
-        if file_system_id is None and mount_target_id is None:
-            raise AttributeError(
-                "file_system_id or mount_target_id must be specified.")
-
-        params = {}
-        if file_system_id is not None:
-            params['FileSystemId'] = file_system_id
-        if mount_target_id is not None:
-            params['MountTargetId'] = mount_target_id
-
-        return self.connection.request(
-            'mount-targets', params=params).object['MountTargets']
-
-    def _ex_connection_class_kwargs(self):
-        kwargs = super(EFSDriver, self)._ex_connection_class_kwargs()
-        kwargs['signature_version'] = self.signature_version
-        return kwargs

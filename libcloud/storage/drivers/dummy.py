@@ -44,8 +44,6 @@ class DummyFileObject(file):
             yield self._get_chunk(self._chunk_len)
             i += 1
 
-        raise StopIteration
-
     def _get_chunk(self, chunk_len):
         chunk = [str(x) for x in random.randint(97, 120)]
         return chunk
@@ -180,10 +178,13 @@ class DummyStorageDriver(StorageDriver):
         for container in list(self._containers.values()):
             yield container['container']
 
-    def list_container_objects(self, container):
+    def list_container_objects(self, container, ex_prefix=None):
         container = self.get_container(container.name)
 
-        return container.objects
+        objects = list(self._containers[container.name]['objects'].values())
+        if ex_prefix is not None:
+            objects = [o for o in objects if o.name.startswith(ex_prefix)]
+        return objects
 
     def get_container(self, container_name):
         """
