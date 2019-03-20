@@ -1514,6 +1514,10 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
         servers = obj['servers']
         return [self._to_node(server) for server in servers]
 
+    def ex_get_snapshot(self, snapshotId):
+        return self._to_snapshot(
+            self.connection.request('/os-snapshots/%s' % snapshotId).object)
+
     def _to_volumes(self, obj):
         volumes = obj['volumes']
         return [self._to_volume(volume) for volume in volumes]
