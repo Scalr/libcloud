@@ -113,7 +113,7 @@ DRIVERS = {
     Provider.OUTSCALE_INC:
     ('libcloud.compute.drivers.ec2', 'OutscaleINCNodeDriver'),
     Provider.VSPHERE:
-    ('libcloud.compute.drivers.vmware', 'VSphereNodeDriver'),
+    ('libcloud.compute.drivers.vsphere', 'VSphereNodeDriver'),
     Provider.PROFIT_BRICKS:
     ('libcloud.compute.drivers.profitbricks', 'ProfitBricksNodeDriver'),
     Provider.VULTR:
@@ -147,6 +147,8 @@ DRIVERS = {
     ('libcloud.compute.drivers.oneandone', 'OneAndOneNodeDriver'),
     Provider.UPCLOUD:
     ('libcloud.compute.drivers.upcloud', 'UpcloudDriver'),
+    Provider.NTTCIS:
+    ('libcloud.compute.drivers.nttcis', 'NttCisNodeDriver'),
 }
 
 

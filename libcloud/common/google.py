@@ -90,13 +90,12 @@ from libcloud.common.types import (ProviderError,
 
 try:
     from cryptography.hazmat.backends import default_backend
-    from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import padding
-    cryptography_available = True
+    from cryptography.hazmat.primitives.hashes import SHA256
+    from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
 except ImportError:
     # The cryptography library is unavailable
-    cryptography_available = False
+    SHA256 = None
 
 UTC_TIMESTAMP_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
 
@@ -470,8 +469,8 @@ class GoogleServiceAcctAuthConnection(GoogleBaseAuthConnection):
     """Authentication class for "Service Account" authentication."""
     def __init__(self, user_id, key, *args, **kwargs):
         """
-        Check to see if cryptography is available, and convert key file path into a
-        key string if the key is in a file.
+        Check to see if cryptography is available, and convert key file path
+        into a key string if the key is in a file.
 
         :param  user_id: Email address to be used for Service Account
                 authentication.
@@ -480,7 +479,7 @@ class GoogleServiceAcctAuthConnection(GoogleBaseAuthConnection):
         :param  key: The RSA Key or path to file containing the key.
         :type   key: ``str``
         """
-        if not cryptography_available:
+        if SHA256 is None:
             raise GoogleAuthError('cryptography library required for '
                                   'Service Account Authentication.')
         # Check to see if 'key' is a file and read the file if it is.
@@ -524,9 +523,16 @@ class GoogleServiceAcctAuthConnection(GoogleBaseAuthConnection):
         # The message contains both the header and claim set
         message = b'.'.join((header_enc, claim_set_enc))
         # Then the message is signed using the key supplied
-        rsa_key = serialization.load_pem_private_key(self.key.encode(), password=None,
-                                                     backend=default_backend())
-        signature = rsa_key.sign(message, padding.PKCS1v15(), hashes.SHA256())
+        key = serialization.load_pem_private_key(
+            b(self.key),
+            password=None,
+            backend=default_backend()
+        )
+        signature = key.sign(
+            data=b(message),
+            padding=PKCS1v15(),
+            algorithm=SHA256()
+        )
         signature = base64.urlsafe_b64encode(signature)
 
         # Finally the message and signature are sent to get a token
@@ -608,9 +614,12 @@ class GoogleAuthType(object):
     @staticmethod
     def _is_gcs_s3(user_id):
         """
-        Checks S3 key format: 20 alphanumeric chars starting with GOOG.
+        Checks S3 key format: alphanumeric chars starting with GOOG.
         """
-        return len(user_id) == 20 and user_id.startswith('GOOG')
+        return (
+            len(user_id) >= 20 and len(user_id) < 30 and user_id
+            .startswith('GOOG')
+        )
 
     @staticmethod
     def _is_sa(user_id):

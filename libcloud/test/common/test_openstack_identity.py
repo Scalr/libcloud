@@ -123,8 +123,8 @@ class OpenStackIdentityConnectionTestCase(unittest.TestCase):
                       parent_conn=connection)
 
             self.assertEqual(osa.urls, {})
-            self.assertEqual(osa.auth_token, None)
-            self.assertEqual(osa.auth_user_info, None)
+            self.assertIsNone(osa.auth_token)
+            self.assertIsNone(osa.auth_user_info)
             osa = osa.authenticate()
 
             self.assertTrue(len(osa.urls) >= 1)
@@ -366,6 +366,25 @@ class OpenStackIdentity_3_0_ConnectionTests(unittest.TestCase):
         domain = self.auth_instance.get_domain(domain_id='default')
         self.assertEqual(domain.name, 'Default')
 
+    def test_get_user(self):
+        user = self.auth_instance.get_user(user_id='a')
+        self.assertEqual(user.id, 'a')
+        self.assertEqual(user.domain_id, 'default')
+        self.assertEqual(user.enabled, True)
+        self.assertEqual(user.email, 'openstack-test@localhost')
+
+    def test_get_user_without_email(self):
+        user = self.auth_instance.get_user(user_id='b')
+        self.assertEqual(user.id, 'b')
+        self.assertEqual(user.name, 'userwithoutemail')
+        self.assertIsNone(user.email)
+
+    def test_get_user_without_enabled(self):
+        user = self.auth_instance.get_user(user_id='c')
+        self.assertEqual(user.id, 'c')
+        self.assertEqual(user.name, 'userwithoutenabled')
+        self.assertIsNone(user.enabled)
+
     def test_create_user(self):
         user = self.auth_instance.create_user(email='test2@localhost', password='test1',
                                               name='test2', domain_id='default')
@@ -422,6 +441,30 @@ class OpenStackIdentity_3_0_ConnectionTests(unittest.TestCase):
                                                                   role=role,
                                                                   user=user)
         self.assertTrue(result)
+
+
+class OpenStackIdentity_3_0_Connection_OIDC_access_token_federation_projectsTests(
+        unittest.TestCase):
+    def setUp(self):
+        mock_cls = OpenStackIdentity_3_0_federation_projects_MockHttp
+        mock_cls.type = None
+        OpenStackIdentity_3_0_Connection_OIDC_access_token.conn_class = mock_cls
+
+        self.auth_instance = OpenStackIdentity_3_0_Connection_OIDC_access_token(auth_url='http://none',
+                                                                                user_id='idp',
+                                                                                key='token',
+                                                                                tenant_name='oidc',
+                                                                                domain_name='test_domain')
+        self.auth_instance.auth_token = 'mock'
+
+    def test_authenticate(self):
+        auth = OpenStackIdentity_3_0_Connection_OIDC_access_token(auth_url='http://none',
+                                                                  user_id='idp',
+                                                                  key='token',
+                                                                  token_scope='project',
+                                                                  tenant_name="oidc",
+                                                                  domain_name='test_domain')
+        auth.authenticate()
 
 
 class OpenStackIdentity_3_0_Connection_OIDC_access_tokenTests(
@@ -484,7 +527,7 @@ class OpenStackServiceCatalogTestCase(unittest.TestCase):
 
         entry = [e for e in entries if e.service_type == 'cloudFilesCDN'][0]
         self.assertEqual(entry.service_type, 'cloudFilesCDN')
-        self.assertEqual(entry.service_name, None)
+        self.assertIsNone(entry.service_name)
         self.assertEqual(len(entry.endpoints), 2)
         self.assertEqual(entry.endpoints[0].region, 'ORD')
         self.assertEqual(entry.endpoints[0].url,
@@ -501,13 +544,13 @@ class OpenStackServiceCatalogTestCase(unittest.TestCase):
         catalog = OpenStackServiceCatalog(service_catalog=service_catalog,
                                           auth_version='2.0')
         entries = catalog.get_entries()
-        self.assertEqual(len(entries), 6)
+        self.assertEqual(len(entries), 9)
 
         entry = [e for e in entries if e.service_name == 'cloudServers'][0]
         self.assertEqual(entry.service_type, 'compute')
         self.assertEqual(entry.service_name, 'cloudServers')
         self.assertEqual(len(entry.endpoints), 1)
-        self.assertEqual(entry.endpoints[0].region, None)
+        self.assertIsNone(entry.endpoints[0].region)
         self.assertEqual(entry.endpoints[0].url,
                          'https://servers.api.rackspacecloud.com/v1.0/1337')
         self.assertEqual(entry.endpoints[0].endpoint_type, 'external')
@@ -523,7 +566,7 @@ class OpenStackServiceCatalogTestCase(unittest.TestCase):
         self.assertEqual(len(entries), 6)
         entry = [e for e in entries if e.service_type == 'volume'][0]
         self.assertEqual(entry.service_type, 'volume')
-        self.assertEqual(entry.service_name, None)
+        self.assertIsNone(entry.service_name)
         self.assertEqual(len(entry.endpoints), 3)
         self.assertEqual(entry.endpoints[0].region, 'regionOne')
         self.assertEqual(entry.endpoints[0].endpoint_type, 'external')
@@ -567,8 +610,9 @@ class OpenStackServiceCatalogTestCase(unittest.TestCase):
         catalog = OpenStackServiceCatalog(service_catalog=service_catalog,
                                           auth_version='2.0')
         service_types = catalog.get_service_types()
-        self.assertEqual(service_types, ['compute', 'object-store',
-                                         'rax:object-cdn'])
+        self.assertEqual(service_types, ['compute', 'image', 'network',
+                                         'object-store', 'rax:object-cdn',
+                                         'volumev2'])
 
         service_types = catalog.get_service_types(region='ORD')
         self.assertEqual(service_types, ['rax:object-cdn'])
@@ -582,10 +626,12 @@ class OpenStackServiceCatalogTestCase(unittest.TestCase):
                                           auth_version='2.0')
 
         service_names = catalog.get_service_names()
-        self.assertEqual(service_names, ['cloudFiles', 'cloudFilesCDN',
-                                         'cloudServers',
+        self.assertEqual(service_names, ['cinderv2', 'cloudFiles',
+                                         'cloudFilesCDN', 'cloudServers',
                                          'cloudServersOpenStack',
                                          'cloudServersPreprod',
+                                         'glance',
+                                         'neutron',
                                          'nova'])
 
         service_names = catalog.get_service_names(service_type='compute')
@@ -656,9 +702,27 @@ class OpenStackIdentity_3_0_MockHttp(MockHttp):
         raise NotImplementedError()
 
     def _v3_users_a(self, method, url, body, headers):
+        if method == 'GET':
+            # look up a user
+            body = self.fixtures.load('v3_users_a.json')
+            return (httplib.OK, body, self.json_content_headers, httplib.responses[httplib.OK])
         if method == 'PATCH':
             # enable / disable user
             body = self.fixtures.load('v3_users_a.json')
+            return (httplib.OK, body, self.json_content_headers, httplib.responses[httplib.OK])
+        raise NotImplementedError()
+
+    def _v3_users_b(self, method, url, body, headers):
+        if method == 'GET':
+            # look up a user
+            body = self.fixtures.load('v3_users_b.json')
+            return (httplib.OK, body, self.json_content_headers, httplib.responses[httplib.OK])
+        raise NotImplementedError()
+
+    def _v3_users_c(self, method, url, body, headers):
+        if method == 'GET':
+            # look up a user
+            body = self.fixtures.load('v3_users_c.json')
             return (httplib.OK, body, self.json_content_headers, httplib.responses[httplib.OK])
         raise NotImplementedError()
 
@@ -728,6 +792,29 @@ class OpenStackIdentity_3_0_MockHttp(MockHttp):
             body = json.dumps({"projects": [{"id": "project_id"}]})
             return (httplib.OK, body, self.json_content_headers, httplib.responses[httplib.OK])
         raise NotImplementedError()
+
+    def _v3_auth_projects(self, method, url, body, headers):
+        if method == 'GET':
+            # get user projects
+            body = json.dumps({"projects": [{"id": "project_id"}]})
+            return (httplib.OK, body, self.json_content_headers, httplib.responses[httplib.OK])
+        raise NotImplementedError()
+
+
+class OpenStackIdentity_3_0_federation_projects_MockHttp(OpenStackIdentity_3_0_MockHttp):
+    fixtures = ComputeFileFixtures('openstack_identity/v3')
+    json_content_headers = {'content-type': 'application/json; charset=UTF-8'}
+
+    def _v3_OS_FEDERATION_projects(self, method, url, body, headers):
+        if method == 'GET':
+            # get user projects
+            body = json.dumps({"projects": [{"id": "project_id"}]})
+            return (httplib.OK, body, self.json_content_headers, httplib.responses[httplib.OK])
+        raise NotImplementedError()
+
+    def _v3_auth_projects(self, method, url, body, headers):
+        return (httplib.INTERNAL_SERVER_ERROR, body, self.json_content_headers,
+                httplib.responses[httplib.INTERNAL_SERVER_ERROR])
 
 
 class OpenStackIdentity_2_0_Connection_VOMSMockHttp(MockHttp):
