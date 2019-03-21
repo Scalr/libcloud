@@ -1889,7 +1889,7 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
         return snapshot_paginator
 
     def list_volume_snapshots(self, volume):
-        return [snapshot for snapshot in self.ex_iterate_snapshots()
+        return [snapshot for snapshot in self.ex_list_snapshots()
                 if snapshot.extra['volume_id'] == volume.id]
 
     def create_volume_snapshot(self, volume, name=None, ex_description=None,
