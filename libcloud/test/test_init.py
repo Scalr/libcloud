@@ -36,7 +36,7 @@ class TestUtils(unittest.TestCase):
         # Debug mode is disabled
         _init_once()
 
-        self.assertEqual(LoggingConnection.log, None)
+        self.assertIsNone(LoggingConnection.log)
 
         if have_paramiko:
             logger = paramiko.util.logging.getLogger()

@@ -89,6 +89,7 @@ class Provider(Type):
     :cvar NEPHOSCALE: NephoScale driver
     :cvar NIMBUS: Nimbus
     :cvar NINEFOLD: Ninefold
+    :cvar NTTC-CIS: NTT Communications CIS
     :cvar OPENNEBULA: OpenNebula.org
     :cvar OPSOURCE: Opsource Cloud
     :cvar OUTSCALE_INC: Outscale INC driver.
@@ -145,6 +146,7 @@ class Provider(Type):
     NIMBUS = 'nimbus'
     NINEFOLD = 'ninefold'
     NTTA = 'ntta'
+    NTTCIS = 'nttcis'
     ONEANDONE = 'oneandone'
     OPENNEBULA = 'opennebula'
     OPENSTACK = 'openstack'
@@ -319,6 +321,15 @@ class VolumeSnapshotState(Type):
     RESTORING = 'restoring'
     UNKNOWN = 'unknown'
     UPDATING = 'updating'
+
+
+class NodeImageMemberState(Type):
+    """
+    Standard states of VolumeSnapshots
+    """
+    ACCEPTED = 'accepted'
+    PENDING = 'pending'
+    REJECTED = 'rejected'
 
 
 class Architecture(object):

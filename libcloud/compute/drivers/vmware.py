@@ -72,7 +72,6 @@ class VSpherePropertyCollector(misc_utils.PageList):
     # pylint: disable=line-too-long
     """
     The paginated PropertyCollector.
-
     See:
      - http://pubs.vmware.com/vsphere-50/index.jsp#com.vmware.wssdk.pg.doc_50/PG_Ch5_PropertyCollector.7.2.html
     """
@@ -84,21 +83,16 @@ class VSpherePropertyCollector(misc_utils.PageList):
         """
         :param driver: The VSphere driver.
         :type driver: :class:`VSphereNodeDriver`
-
         :param object_cls: Type of managed object.
         :type object_cls: :class:`vim.ManagedEntity`
-
         :param container: The :class:`vim.Folder` or :class:`vim.Datacenter`
             instance that provides the objects that the view presents.
         :type container: :class:`vim.Folder` or :class:`vim.Datacenter`
-
         :param path_set: List of properties to retrieve, defaults to ``None``.
         :type path_set: list or None
-
         :param page_size: The size of the result page,
             defaults to ``DEFAULT_PAGE_SIZE``.
         :param page_size: int or None
-
         :param process_fn: Function to be applied to the page result,
             defaults to ``None``.
         :param process_fn: callable or None
@@ -175,7 +169,6 @@ class VSpherePropertyCollector(misc_utils.PageList):
     def _create_property_collector(self):
         """
         Initializes the property collector.
-
         :return: The property collector and paramaters for
             :meth:`vmodl.query.PropertyCollector.RetrieveProperties` method.
         :rtype: tulpe(:class:`vmodl.query.PropertyCollector`, tuple)
@@ -244,11 +237,9 @@ class VCenterFileSearch(misc_utils.PageList):
     # pylint: disable=line-too-long
     """
     Search for the files that match the given search criteria.
-
     See:
         - http://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.DatastoreBrowser.html
         - https://pubs.vmware.com/vsphere-51/topic/com.vmware.wssdk.apiref.doc/vim.host.DatastoreBrowser.SearchSpec.html
-
     Returns a list of :class:`_FileInfo` paginated by datastores,
     one datastore represents the one page of results.
     """
@@ -257,14 +248,12 @@ class VCenterFileSearch(misc_utils.PageList):
         """
         :param driver: The VSphere driver.
         :type driver: :class:`VSphereNodeDriver`
-
         :param file_query: The set of file types to match, search criteria
             specific to the file type, and the amount of detail for a file.
             This parameter must be a subclass of :class:`vim.FileQuery`
             (:class:`vim.VmDiskFileQuery`, :class:`vim.VmSnapshotFileQuery`,
             :class:`vim.VmConfigFileQuery` etc.).
         :type file_query: :class:`vim.FileQuery`
-
         :param process_fn: Function to be applied to result page,
             defaults to ``None``.
         :param process_fn: callable or None
@@ -293,7 +282,6 @@ class VCenterFileSearch(misc_utils.PageList):
     def _retrieve_files(self):
         """
         Retrieves the files the datastores.
-
         :returns: The list of files from one datastore.
         :rtype: list[:class:`_FileInfo`]
         """
@@ -369,7 +357,6 @@ class VCenterFileSearch(misc_utils.PageList):
             interval=0.5):
         """
         Wait for a vCenter task to finish.
-
         :returns: Result if task is successfully completed, otherwise it
             returns a ``None``.
         """
@@ -517,7 +504,6 @@ class _VMDiskInfo(object):
 class VSphereConnection(ConnectionUserAndKey):
     """
     Represents a single connection to the VSphere platform.
-
     Note: Uses SOAP for communication.
     """
 
@@ -562,7 +548,6 @@ class VSphereConnection(ConnectionUserAndKey):
     def connect(self, host=None, port=None, base_url=None, **kwargs):
         """
         Establish a connection with the API server.
-
         :param str host: Optional host to override our default.
         :param int port: Optional port to override our default.
         :param str base_url: Optional URL to override our default.
@@ -643,12 +628,10 @@ class VSphereNodeDriver(NodeDriver):
         :param created_at_limit: The limit (in days) on the `created_at`
             datetimes, the small value may increase the listing
             performance. (optional, 30 by default)
-
             See:
              - :meth:`self._query_node_creation_times`
              - :meth:`self._query_volume_creation_times`
         :type created_at_limit: int | float | None
-
         :param allow_caching: Allow data caching for the expensive requests.
             (optional, `False` by default)
         :type allow_caching: bool
@@ -682,11 +665,9 @@ class VSphereNodeDriver(NodeDriver):
             volume_creation_times=True):
         """
         Pre-loading data into cache which is needed in the future.
-
         :param node_creation_times: Pre-cache the nodes/images creation
             timestamps.
         :type node_creation_times: bool
-
         :param volume_creation_times: Pre-cache the volumes creation timestamps.
         :type volume_creation_times: bool
         """
@@ -718,11 +699,9 @@ class VSphereNodeDriver(NodeDriver):
     def list_nodes(self, ex_datacenter=None, ex_page_size=None):
         """
         Lists available nodes (excluding templates).
-
         :param ex_datacenter: Filters the node list to nodes that are
             located in this datacenter. (optional)
         :type ex_datacenter: str | :class:`vim.Datacenter` | None
-
         :rtype: list[Node]
         """
         return list(self.iterate_nodes(
@@ -733,7 +712,6 @@ class VSphereNodeDriver(NodeDriver):
     def iterate_nodes(self, ex_datacenter=None, ex_page_size=None):
         """
         Iterate available nodes (excluding templates).
-
         :rtype: collections.Iterable[Node]
         """
         if ex_datacenter is not None:
@@ -769,11 +747,9 @@ class VSphereNodeDriver(NodeDriver):
     def list_images(self, ex_datacenter=None, ex_page_size=None):
         """
         List available images (templates).
-
         :param ex_datacenter: Filters the node list to nodes that are
             located in this datacenter. (optional)
         :type ex_datacenter: str | :class:`vim.Datacenter` | None
-
         :rtype: list[Image]
         """
         return list(self.iterate_images(
@@ -784,7 +760,6 @@ class VSphereNodeDriver(NodeDriver):
     def iterate_images(self, ex_datacenter=None, ex_page_size=None):
         """
         Iterate available images (templates).
-
         :rtype: collections.Iterable[Image]
         """
         if ex_datacenter is not None:
@@ -818,11 +793,9 @@ class VSphereNodeDriver(NodeDriver):
     def list_volumes(self, node=None, ex_datacenter=None):
         """
         List available volumes (on all datastores).
-
         :param ex_datacenter: Filters the volume list to volume that are
             located in this datacenter. (optional)
         :type ex_datacenter: str | :class:`vim.Datacenter` | None
-
         :rtype: list[StorageVolume]
         """
         return list(self.iterate_volumes(node=node, ex_datacenter=ex_datacenter))
@@ -830,7 +803,6 @@ class VSphereNodeDriver(NodeDriver):
     def iterate_volumes(self, node=None, ex_datacenter=None):
         """
         Iterate available volumes (on all datastores).
-
         :rtype: collections.Iterable[StorageVolume]
         """
         if node is not None:
@@ -907,11 +879,9 @@ class VSphereNodeDriver(NodeDriver):
     def list_snapshots(self, ex_datacenter=None, ex_page_size=None):
         """
         List available snapshots.
-
         :param ex_datacenter: Filters the snapshots list to snapshots that are
             located in this datacenter. (optional)
         :type ex_datacenter: str | :class:`vim.Datacenter` | None
-
         :rtype: list[VolumeSnapshot]
         """
         return list(self.iterate_snapshots(
@@ -922,7 +892,6 @@ class VSphereNodeDriver(NodeDriver):
     def iterate_snapshots(self, ex_datacenter=None, ex_page_size=None):
         """
         Iterate available snapshots.
-
         :rtype: collections.Iterable[VolumeSnapshot]
         """
         if ex_datacenter is not None:
@@ -953,7 +922,6 @@ class VSphereNodeDriver(NodeDriver):
     def _walk_snapshot_tree(self, snapshot_tree):
         """
         :param snapshot_tree: vim.vm.SnapshotTree
-
         :rtype: list[:class:`vim.vm.SnapshotTree`]
         """
         snapshot_data = []
@@ -966,10 +934,8 @@ class VSphereNodeDriver(NodeDriver):
     def _get_datacenter_by_id(self, datacenter_id):
         """
         Returns the VMWare datacenter for a given ID.
-
         :param datacenter_id: The ID of the datacenter.
         :type datacenter_id: str
-
         :rtype: :class:`vim.Datacenter`
         """
         if isinstance(datacenter_id, vim.Datacenter):
@@ -984,12 +950,9 @@ class VSphereNodeDriver(NodeDriver):
     def _get_datastores_info_map(self):
         """
         Returns the datastore info to datacenter map.
-
         See: https://pubs.vmware.com/vi30/sdk/ReferenceGuide/vim.host.VmfsDatastoreInfo.html
-
         Note: This method is used during iteration in `self.iter_*` methods,
             so the result will be cached ignoring `self._allow_caching` option.
-
         :rtype: dict[:class:`vim.VmfsDatastoreInfo`, :class:`vim.Datacenter`]
         """
         if 'datastores_info_map' not in self._cache:
@@ -1002,10 +965,8 @@ class VSphereNodeDriver(NodeDriver):
     def _get_datacenter_ids_map(self):
         """
         Returns the datacenter ID to datacenter object map.
-
         Note: This method is used during iteration in `self.iter_*` methods,
             so the result will be cached ignoring `self._allow_caching` option.
-
         :rtype: dict[str, :class:`vim.Datacenter`]
         """
         if 'datacenter_ids_map' not in self._cache:
@@ -1018,13 +979,10 @@ class VSphereNodeDriver(NodeDriver):
     def _get_datacenter_id_by_url(self, url):
         """
         Returns the datacenter ID for a given datastore URL.
-
         Example URLs:
          - `/vmfs/volumes/599d9c57-a93b0b7a-ea4c-984be16496c6`
          - `ds:///vmfs/volumes/599d9c57-a93b0b7a-ea4c-984be16496c6/volume.vmdk`
-
         :raise :class:`LibcloudError`: When volume URL format is invalid.
-
         :type url: str | :class:`vim.vm.ConfigInfo.DatastoreUrlPair` | list
         :rtype: str | None
         """
@@ -1049,7 +1007,6 @@ class VSphereNodeDriver(NodeDriver):
     def _query_node_creation_times(self, virtual_machine=None):
         """
         Fetches the creation timestamps of the VMs from the event history.
-
         :type virtual_machine: :class:`vim.VirtualMachine`
         :rtype: dict[str, :class:`datetime.datetime`]
         """
@@ -1086,7 +1043,6 @@ class VSphereNodeDriver(NodeDriver):
         """
         Fetches the creation timestamps of the extra volumes
         from the event history.
-
         :type virtual_machine: :class:`vim.VirtualMachine`
         :rtype: dict[str, :class:`datetime.datetime`]
         """
@@ -1123,7 +1079,6 @@ class VSphereNodeDriver(NodeDriver):
     def ex_get_vm(self, node_or_uuid):
         """
         Searches VMs for a given instance_uuid or Node object.
-
         :type node_or_uuid: :class:`Node` | str
         :rtype: :class:`vim.VirtualMachine`
         """
@@ -1138,9 +1093,7 @@ class VSphereNodeDriver(NodeDriver):
     def ex_list_datacenters(self):
         """
         Returns list of datacenters.
-
         See: https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.Datacenter.html
-
         :rtype: list[:class:`vim.Datacenter`]
         """
         return list(VSpherePropertyCollector(self, vim.Datacenter))
@@ -1148,9 +1101,7 @@ class VSphereNodeDriver(NodeDriver):
     def ex_list_datastores(self):
         """
         Returns the list of datastores.
-
         See: https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.Datastore.html
-
         :rtype: list[:class:`vim.Datastore`]
         """
         return list(VSpherePropertyCollector(self, vim.Datastore))
@@ -1158,11 +1109,9 @@ class VSphereNodeDriver(NodeDriver):
     def ex_file_name_to_path(self, name):
         """
         Converts file name to full path.
-
         Example:
           name: ``[ds.n1.c1.dc1] base-centos7.vmdk``
           return: ``ds:///vmfs/volumes/<datastore-id>/base-centos7.vmdk``
-
         :type name: str
         :type datastores: list[:class:`vim.Datastore`]
         """
@@ -1191,38 +1140,30 @@ class VSphereNodeDriver(NodeDriver):
         """
         Returns the events in specified filter. Returns empty array when
         there are not any events qualified.
-
         Note: vCenter Server stores events in the database for a limited period.
             The default number of days to retain event messages in the database
             is 30.
-
         :param event_type_id: This property, if set, limits the set of collected
             events to those specified types. (optional)
         :type event_type_id: str | list[str]
-
         :param entity: The filter specification for retrieving events by managed
             entity. If the property is not set, then events attached to all
             managed entities are collected. (optional)
         :type entity: :class:`vim.ManagedEntity`
-
         :param begin_time: The beginning of the time range. If this property is
             not set, then events are collected from the earliest
             time in the database. (optional)
         :type begin_time: :class:`datetime.datetime`
-
         :param end_time: The end of the time range. If this property is not
             specified, then events are collected up to the latest
             time in the database. (optional)
         :type end_time: :class:`datetime.datetime`
-
         :param userlist: This option specifies users used to filter event
             history. (optional)
         :type userlist: str | list[str]
-
         :param system_user: Filter by system user true for system user
             event. (optional)
         :type system_user: bool
-
         :rtype: list[:class:`vim.Event`]
         """
         filter_spec = vim.event.EventFilterSpec(eventTypeId=event_type_id)
@@ -1287,13 +1228,10 @@ class VSphereNodeDriver(NodeDriver):
             process_fn=None):
         """
         Return properties of :class:`vim.vm.device.VirtualDisk`.
-
         See:
          - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.device.VirtualDisk.html
-
         :param virtual_machine: The virtual machine.
         :type virtual_machine: :class:`vim.VirtualMachine`
-
         :rtype: tp.Iterable[:class:`_VMDiskInfo`]
         """
         def result_to_disks(result):
@@ -1360,7 +1298,6 @@ class VSphereNodeDriver(NodeDriver):
     def ex_get_node_by_uuid(self, uuid):
         """
         Searches Node for a given ``uuid``.
-
         :rtype: :class:`Node`
         """
         return self._to_node(vm_entity=self.ex_get_vm(uuid))
@@ -1368,7 +1305,6 @@ class VSphereNodeDriver(NodeDriver):
     def _to_node(self, vm_entity, vm_properties=None):
         """
         Creates :class:`Node` object from :class:`vim.VirtualMachine`.
-
         :param vm_properties: VM properties.
         :type vm_properties: dict
         """
@@ -1460,22 +1396,17 @@ class VSphereNodeDriver(NodeDriver):
     def _to_volume(self, file_info):
         """
         Creates :class:`StorageVolume` object from :class:`_FileInfo`.
-
         The volume ID format: `ds:///vmfs/volumes/<store-id>/<volume-path>.vmdk`
-
         The extra dict format:
          - file_path: ``str``
          - last_modified: ``None`` | :class:`datetime.datetime`
          - created_at: ``None`` | :class:`datetime.datetime`
          - devices: ``dict[str, list[dict]]``
-
         :param file_info: The VMDK file info.
         :type file_info: :class:`_FileInfo`.
-
         :raise :class:`LibcloudError`: When creating volume with multiple
             non-shared devices.
         :raise :class:`LibcloudError`: When volume URL format is invalid.
-
         :rtype: :class:`StorageVolume`
         """
         if len(file_info.devices) > 1 and not all(
@@ -1507,15 +1438,12 @@ class VSphereNodeDriver(NodeDriver):
     def _to_snapshot(self, snapshot_tree, vm_properties=None):
         """
         Creates :class:`VolumeSnapshot` object from :class:`vim.vm.SnapshotTree`.
-
         See:
           - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.SnapshotTree.html
           - https://pubs.vmware.com/vi3/sdk/ReferenceGuide/vim.vm.Snapshot.html
-
         :type snapshot_tree: :class:`vim.vm.SnapshotTree`
         :type snapshot_layout: :class:`vim.vm.FileLayoutEx.SnapshotLayout`
         :type file_layout: :class:`vim.vm.FileLayoutEx.FileInfo`
-
         :returns: Storage volume snapthot.
         :rtype: :class:`VolumeSnapshot`
         """

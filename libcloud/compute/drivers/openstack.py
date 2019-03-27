@@ -15,6 +15,7 @@
 """
 OpenStack driver
 """
+
 from libcloud.common.exceptions import BaseHTTPError
 from libcloud.utils.iso8601 import parse_date
 
@@ -31,18 +32,21 @@ from libcloud.utils.py3 import httplib
 from libcloud.utils.py3 import b
 from libcloud.utils.py3 import next
 from libcloud.utils.py3 import urlparse
+from libcloud.utils.py3 import parse_qs
+
 
 from libcloud.common.openstack import OpenStackBaseConnection
 from libcloud.common.openstack import OpenStackDriverMixin
 from libcloud.common.openstack import OpenStackException
 from libcloud.common.openstack import OpenStackResponse
 from libcloud.utils.networking import is_public_subnet
-from libcloud.compute.base import NodeSize, NodeImage
+from libcloud.compute.base import NodeSize, NodeImage, NodeImageMember, \
+    UuidMixin
 from libcloud.compute.base import (NodeDriver, Node, NodeLocation,
                                    StorageVolume, VolumeSnapshot)
 from libcloud.compute.base import KeyPair
 from libcloud.compute.types import NodeState, StorageVolumeState, Provider, \
-    VolumeSnapshotState, LibcloudError
+    VolumeSnapshotState, LibcloudError, Type
 from libcloud.pricing import get_size_price
 from libcloud.utils.xml import findall
 from libcloud.utils.py3 import ET
@@ -57,7 +61,10 @@ __all__ = [
     'OpenStack_1_1_Connection',
     'OpenStack_1_1_NodeDriver',
     'OpenStack_1_1_FloatingIpPool',
+    'OpenStack_2_FloatingIpPool',
     'OpenStack_1_1_FloatingIpAddress',
+    'OpenStack_2_PortInterfaceState',
+    'OpenStack_2_PortInterface',
     'OpenStackNodeDriver'
 ]
 
@@ -66,7 +73,7 @@ ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
 DEFAULT_API_VERSION = '1.1'
 
 DEFAULT_PAGE_SIZE = 1000
-
+PAGINATION_LIMIT = 1000
 
 class OpenStackPageList(misc_utils.PageList):
     page_token_name = 'marker'
@@ -119,6 +126,24 @@ class OpenStackComputeConnection(OpenStackBaseConnection):
     service_region = 'RegionOne'
 
 
+class OpenStackImageConnection(OpenStackBaseConnection):
+    service_type = 'image'
+    service_name = 'glance'
+    service_region = 'RegionOne'
+
+
+class OpenStackNetworkConnection(OpenStackBaseConnection):
+    service_type = 'network'
+    service_name = 'neutron'
+    service_region = 'RegionOne'
+
+
+class OpenStackVolumeV2Connection(OpenStackBaseConnection):
+    service_type = 'volumev2'
+    service_name = 'cinderv2'
+    service_region = 'RegionOne'
+
+
 class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
     """
     Base OpenStack node driver. Should not be used directly.
@@ -131,7 +156,7 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
         'BUILD': NodeState.PENDING,
         'REBUILD': NodeState.PENDING,
         'ACTIVE': NodeState.RUNNING,
-        'SUSPENDED': NodeState.STOPPED,
+        'SUSPENDED': NodeState.SUSPENDED,
         'SHUTOFF': NodeState.STOPPED,
         'DELETED': NodeState.TERMINATED,
         'QUEUE_RESIZE': NodeState.PENDING,
@@ -191,6 +216,57 @@ class OpenStackNodeDriver(NodeDriver, OpenStackDriverMixin):
     def __init__(self, *args, **kwargs):
         OpenStackDriverMixin.__init__(self, **kwargs)
         super(OpenStackNodeDriver, self).__init__(*args, **kwargs)
+
+    @staticmethod
+    def _paginated_request(url, obj, connection, params=None):
+        """
+        Perform multiple calls in order to have a full list of elements when
+        the API responses are paginated.
+
+        :param url: API endpoint
+        :type url: ``str``
+
+        :param obj: Result object key
+        :type obj: ``str``
+
+        :param connection: The API connection to use to perform the request
+        :type connection: ``obj``
+
+        :param params: Any request parameters
+        :type params: ``dict``
+
+        :return: ``list`` of API response objects
+        :rtype: ``list``
+        """
+        params = params or {}
+        objects = list()
+        loop_count = 0
+        while True:
+            data = connection.request(url, params=params)
+            values = data.object.get(obj, list())
+            objects.extend(values)
+            links = data.object.get('%s_links' % obj, list())
+            next_links = [n for n in links if n['rel'] == 'next']
+            if next_links:
+                next_link = next_links[0]
+                query = urlparse.urlparse(next_link['href'])
+                # The query[4] references the query parameters from the url
+                params.update(parse_qs(query[4]))
+            else:
+                break
+
+            # Prevent the pagination from looping indefinitely in case
+            # the API returns a loop for some reason.
+            loop_count += 1
+            if loop_count > PAGINATION_LIMIT:
+                raise OpenStackException(
+                    'Pagination limit reached for %s, the limit is %d. '
+                    'This might indicate that your API is returning a '
+                    'looping next target for pagination!' % (
+                        url, PAGINATION_LIMIT
+                    ), None
+                )
+        return {obj: objects}
 
     def destroy_node(self, node):
         uri = '/servers/%s' % (node.id)
@@ -977,6 +1053,7 @@ class OpenStack_1_0_NodeDriver(OpenStackNodeDriver):
                                  # XXX: needs hardcode
                                  vcpus=vcpus,
                                  bandwidth=None,
+                                 extra=el.get('extra_specs'),
                                  # Hardcoded
                                  price=self._get_size_price(el.get('id')),
                                  driver=self.connection.driver)
@@ -1181,7 +1258,7 @@ class OpenStackSecurityGroupRule(object):
 
     def __init__(self, id, parent_group_id, ip_protocol, from_port, to_port,
                  driver, ip_range=None, group=None, tenant_id=None,
-                 extra=None):
+                 direction=None, extra=None):
         """
         Constructor.
 
@@ -1209,6 +1286,9 @@ class OpenStackSecurityGroupRule(object):
         :keyword    tenant_id: Owner of the security group.
         :type       tenant_id: ``str``
 
+        :keyword    direction: Security group Direction (ingress or egress).
+        :type       direction: ``str``
+
         :keyword    extra: Extra attributes associated with this rule.
         :type       extra: ``dict``
         """
@@ -1220,11 +1300,21 @@ class OpenStackSecurityGroupRule(object):
         self.driver = driver
         self.ip_range = ''
         self.group = {}
+        self.direction = 'ingress'
 
         if group is None:
             self.ip_range = ip_range
         else:
             self.group = {'name': group, 'tenant_id': tenant_id}
+
+        # by default in old versions only ingress was used
+        if direction is not None:
+            if direction in ['ingress', 'egress']:
+                self.direction = direction
+            else:
+                raise OpenStackException("Security group direction incorrect "
+                                         "value: ingress or egress.", 500,
+                                         driver)
 
         self.tenant_id = tenant_id
         self.extra = extra or {}
@@ -1324,7 +1414,7 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
         :type       ex_metadata: ``dict``
 
         :keyword    ex_files:   File Path => File contents to create on
-                                the no  de
+                                the node
         :type       ex_files:   ``dict``
 
 
@@ -1375,25 +1465,58 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
 
     def _to_image(self, api_image):
         server = api_image.get('server', {})
+        updated = api_image.get('updated_at') or api_image['updated']
+        created = api_image.get('created_at') or api_image['created']
+        min_ram = api_image.get('min_ram')
+
+        if min_ram is None:
+            min_ram = api_image.get('minRam')
+
+        min_disk = api_image.get('min_disk')
+
+        if min_disk is None:
+            min_disk = api_image.get('minDisk')
+
         return NodeImage(
             id=api_image['id'],
             name=api_image['name'],
             driver=self,
             extra=dict(
-                updated=api_image['updated'],
-                created=api_image['created'],
+                visibility=api_image.get('visibility'),
+                updated=updated,
+                created=created,
                 status=api_image['status'],
                 progress=api_image.get('progress'),
                 metadata=api_image.get('metadata'),
+                os_type=api_image.get('os_type'),
                 serverId=server.get('id'),
-                minDisk=api_image.get('minDisk'),
-                minRam=api_image.get('minRam'),
+                minDisk=min_disk,
+                minRam=min_ram,
+            )
+        )
+
+    def _to_image_member(self, api_image_member):
+        created = api_image_member['created_at']
+        updated = api_image_member.get('updated_at')
+        return NodeImageMember(
+            id=api_image_member['member_id'],
+            image_id=api_image_member['image_id'],
+            state=api_image_member['status'],
+            created=created,
+            driver=self,
+            extra=dict(
+                schema=api_image_member.get('schema'),
+                updated=updated,
             )
         )
 
     def _to_nodes(self, obj):
         servers = obj['servers']
         return [self._to_node(server) for server in servers]
+
+    def ex_get_snapshot(self, snapshotId):
+        return self._to_snapshot(
+            self.connection.request('/os-snapshots/%s' % snapshotId).object)
 
     def _to_volumes(self, obj):
         volumes = obj['volumes']
@@ -1511,7 +1634,7 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
         :type       ex_metadata: ``dict``
 
         :keyword    ex_files:   File Path => File contents to create on
-                                the no  de
+                                the node
         :type       ex_files:   ``dict``
 
         :keyword    ex_keyname:  Name of existing public key to inject into
@@ -1708,7 +1831,7 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
 
     def ex_delete_network(self, network):
         """
-        Get a list of NodeNetorks that are available.
+        Delete a Network
 
         :param network: Network which should be used
         :type network: :class:`OpenStackNetwork`
@@ -1718,7 +1841,7 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
         resp = self.connection.request('%s/%s' % (self._networks_url_prefix,
                                                   network.id),
                                        method='DELETE')
-        return resp.status == httplib.ACCEPTED
+        return resp.status in (httplib.NO_CONTENT, httplib.ACCEPTED)
 
     def ex_get_console_output(self, node, length=None):
         """
@@ -1766,7 +1889,7 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
         return snapshot_paginator
 
     def list_volume_snapshots(self, volume):
-        return [snapshot for snapshot in self.ex_iterate_snapshots()
+        return [snapshot for snapshot in self.ex_list_snapshots()
                 if snapshot.extra['volume_id'] == volume.id]
 
     def create_volume_snapshot(self, volume, name=None, ex_description=None,
@@ -1868,7 +1991,8 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
                 security_groups]
 
     def _to_security_group(self, obj):
-        rules = self._to_security_group_rules(obj.get('rules', []))
+        rules = self._to_security_group_rules(obj.get('security_group_rules',
+                                                      obj.get('rules', [])))
         return OpenStackSecurityGroup(id=obj['id'],
                                       tenant_id=obj['tenant_id'],
                                       name=obj['name'],
@@ -2258,20 +2382,25 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
 
         return StorageVolume(
             id=api_node['id'],
-            name=api_node['displayName'],
+            name=api_node.get('displayName', api_node.get('name')),
             size=api_node['size'],
             state=state,
             driver=self,
             extra={
-                'description': api_node['displayDescription'],
+                'description': api_node.get('displayDescription',
+                                            api_node.get('description')),
                 'attachments': [att for att in api_node['attachments'] if att],
                 # TODO: remove in 1.18.0
                 'state': api_node.get('status', None),
-                'snapshot_id': api_node.get('snapshotId', None),
-                'location': api_node.get('availabilityZone', None),
-                'volume_type': api_node.get('volumeType', None),
+                'snapshot_id': api_node.get('snapshot_id',
+                                            api_node.get('snapshotId')),
+                'location': api_node.get('availability_zone',
+                                         api_node.get('availabilityZone')),
+                'volume_type': api_node.get('volume_type',
+                                            api_node.get('volumeType')),
                 'metadata': api_node.get('metadata', None),
-                'created_at': api_node.get('createdAt', None)
+                'created_at': api_node.get('created_at',
+                                           api_node.get('createdAt'))
             }
         )
 
@@ -2280,10 +2409,13 @@ class OpenStack_1_1_NodeDriver(OpenStackNodeDriver):
             data = data['snapshot']
 
         volume_id = data.get('volume_id', data.get('volumeId', None))
-        display_name = data.get('display_name', data.get('displayName', None))
+        display_name = data.get('name',
+                                data.get('display_name',
+                                         data.get('displayName', None)))
         created_at = data.get('created_at', data.get('createdAt', None))
-        description = data.get('display_description',
-                               data.get('displayDescription', None))
+        description = data.get('description',
+                               data.get('display_description',
+                                        data.get('displayDescription', None)))
         status = data.get('status', None)
 
         extra = {'volume_id': volume_id,
@@ -2554,22 +2686,842 @@ class OpenStack_2_Connection(OpenStackComputeConnection):
         return json.dumps(data)
 
 
+class OpenStack_2_ImageConnection(OpenStackImageConnection):
+    responseCls = OpenStack_1_1_Response
+    accept_format = 'application/json'
+    default_content_type = 'application/json; charset=UTF-8'
+
+    def encode_data(self, data):
+        return json.dumps(data)
+
+
+class OpenStack_2_NetworkConnection(OpenStackNetworkConnection):
+    responseCls = OpenStack_1_1_Response
+    accept_format = 'application/json'
+    default_content_type = 'application/json; charset=UTF-8'
+
+    def encode_data(self, data):
+        return json.dumps(data)
+
+
+class OpenStack_2_VolumeV2Connection(OpenStackVolumeV2Connection):
+    responseCls = OpenStack_1_1_Response
+    accept_format = 'application/json'
+    default_content_type = 'application/json; charset=UTF-8'
+
+    def encode_data(self, data):
+        return json.dumps(data)
+
+
+class OpenStack_2_PortInterfaceState(Type):
+    """
+    Standard states of OpenStack_2_PortInterfaceState
+    """
+    BUILD = 'build'
+    ACTIVE = 'active'
+    DOWN = 'down'
+    UNKNOWN = 'unknown'
+
+
 class OpenStack_2_NodeDriver(OpenStack_1_1_NodeDriver):
     """
     OpenStack node driver.
     """
     connectionCls = OpenStack_2_Connection
+
+    # Previously all image functionality was available through the
+    # compute API. This deprecated proxied API does not offer all
+    # functionality that the Glance Image service API offers.
+    # See https://developer.openstack.org/api-ref/compute/
+    #
+    # > These APIs are proxy calls to the Image service. Nova has deprecated
+    # > all the proxy APIs and users should use the native APIs instead. These
+    # > will fail with a 404 starting from microversion 2.36. See: Relevant
+    # > Image APIs.
+    #
+    # For example, managing image visibility and sharing machine
+    # images across tenants can not be done using the proxied image API in the
+    # compute endpoint, but it can be done with the Glance Image API.
+    # See https://developer.openstack.org/api-ref/
+    # image/v2/index.html#list-image-members
+    image_connectionCls = OpenStack_2_ImageConnection
+    image_connection = None
+
+    # Similarly not all node-related operations are exposed through the
+    # compute API
+    # See https://developer.openstack.org/api-ref/compute/
+    # For example, creating a new node in an OpenStack that is configured to
+    # create a new port for every new instance will make it so that if that
+    # port is detached it disappears. But if the port is manually created
+    # beforehand using the neutron network API and node is booted with that
+    # port pre-specified, then detaching that port later will result in that
+    # becoming a re-attachable resource much like a floating ip. So because
+    # even though this is the compute driver, we do connect to the networking
+    # API here because some operations relevant for compute can only be
+    # accessed from there.
+    network_connectionCls = OpenStack_2_NetworkConnection
+    network_connection = None
+
+    # Similarly all image operations are noe exposed through the block-storage
+    # API of the cinde service:
+    # https://developer.openstack.org/api-ref/block-storage/
+    volumev2_connectionCls = OpenStack_2_VolumeV2Connection
+    volumev2_connection = None
+
     type = Provider.OPENSTACK
 
     features = {"create_node": ["generates_password"]}
-    _networks_url_prefix = '/os-networks'
+    _networks_url_prefix = '/v2.0/networks'
+    _subnets_url_prefix = '/v2.0/subnets'
+
+    PORT_INTERFACE_MAP = {
+        'BUILD': OpenStack_2_PortInterfaceState.BUILD,
+        'ACTIVE': OpenStack_2_PortInterfaceState.ACTIVE,
+        'DOWN': OpenStack_2_PortInterfaceState.DOWN,
+        'UNKNOWN': OpenStack_2_PortInterfaceState.UNKNOWN
+    }
 
     def __init__(self, *args, **kwargs):
+        original_connectionCls = self.connectionCls
         self._ex_force_api_version = str(kwargs.pop('ex_force_api_version',
                                                     None))
         if 'ex_force_auth_version' not in kwargs:
             kwargs['ex_force_auth_version'] = '3.x_password'
+
+        original_ex_force_base_url = kwargs.get('ex_force_base_url')
+
+        # We run the init once to get the Glance V2 API connection
+        # and put that on the object under self.image_connection.
+        if original_ex_force_base_url or kwargs.get('ex_force_image_url'):
+            kwargs['ex_force_base_url'] = \
+                str(kwargs.pop('ex_force_image_url',
+                               original_ex_force_base_url))
+        self.connectionCls = self.image_connectionCls
         super(OpenStack_2_NodeDriver, self).__init__(*args, **kwargs)
+        self.image_connection = self.connection
+
+        # We run the init once to get the Cinder V2 API connection
+        # and put that on the object under self.volumev2_connection.
+        if original_ex_force_base_url or kwargs.get('ex_force_volume_url'):
+            kwargs['ex_force_base_url'] = \
+                str(kwargs.pop('ex_force_volume_url',
+                               original_ex_force_base_url))
+        self.connectionCls = self.volumev2_connectionCls
+        super(OpenStack_2_NodeDriver, self).__init__(*args, **kwargs)
+        self.volumev2_connection = self.connection
+
+        # We run the init once to get the Neutron V2 API connection
+        # and put that on the object under self.network_connection.
+        if original_ex_force_base_url or kwargs.get('ex_force_network_url'):
+            kwargs['ex_force_base_url'] = \
+                str(kwargs.pop('ex_force_network_url',
+                               original_ex_force_base_url))
+        self.connectionCls = self.network_connectionCls
+        super(OpenStack_2_NodeDriver, self).__init__(*args, **kwargs)
+        self.network_connection = self.connection
+
+        # We run the init once again to get the compute API connection
+        # and that's put under self.connection as normal.
+        self._ex_force_base_url = original_ex_force_base_url
+        if original_ex_force_base_url:
+            kwargs['ex_force_base_url'] = self._ex_force_base_url
+        self.connectionCls = original_connectionCls
+        super(OpenStack_2_NodeDriver, self).__init__(*args, **kwargs)
+
+    def _to_port(self, element):
+        created = element.get('created_at')
+        updated = element.get('updated_at')
+        return OpenStack_2_PortInterface(
+            id=element['id'],
+            state=self.PORT_INTERFACE_MAP.get(
+                element.get('status'), OpenStack_2_PortInterfaceState.UNKNOWN
+            ),
+            created=created,
+            driver=self,
+            extra=dict(
+                admin_state_up=element['admin_state_up'],
+                allowed_address_pairs=element['allowed_address_pairs'],
+                binding_vnic_type=element['binding:vnic_type'],
+                device_id=element['device_id'],
+                description=element['description'],
+                device_owner=element['device_owner'],
+                fixed_ips=element['fixed_ips'],
+                mac_address=element['mac_address'],
+                name=element['name'],
+                network_id=element['network_id'],
+                project_id=element.get('project_id', None),
+                port_security_enabled=element.get('port_security_enabled',
+                                                  None),
+                revision_number=element.get('revision_number', None),
+                security_groups=element['security_groups'],
+                tags=element.get('tags', None),
+                tenant_id=element['tenant_id'],
+                updated=updated,
+            )
+        )
+
+    def list_nodes(self, ex_all_tenants=False):
+        """
+        List the nodes in a tenant
+
+        :param ex_all_tenants: List nodes for all the tenants. Note: Your user
+                               must have admin privileges for this
+                               functionality to work.
+        :type ex_all_tenants: ``bool``
+        """
+        params = {}
+        if ex_all_tenants:
+            params = {'all_tenants': 1}
+        return self._to_nodes(self._paginated_request(
+            '/servers/detail', 'servers', self.connection, params=params))
+
+    def get_image(self, image_id):
+        """
+        Get a NodeImage using the V2 Glance API
+
+        @inherits: :class:`OpenStack_1_1_NodeDriver.get_image`
+
+        :param      image_id: ID of the image which should be used
+        :type       image_id: ``str``
+
+        :rtype: :class:`NodeImage`
+        """
+        return self._to_image(self.image_connection.request(
+            '/v2/images/%s' % (image_id,)).object)
+
+    def list_images(self, location=None, ex_only_active=True):
+        """
+        Lists all active images using the V2 Glance API
+
+        @inherits: :class:`NodeDriver.list_images`
+
+        :param location: Which data center to list the images in. If
+                               empty, undefined behavior will be selected.
+                               (optional)
+        :type location: :class:`.NodeLocation`
+
+        :param ex_only_active: True if list only active (optional)
+        :type ex_only_active: ``bool``
+        """
+        if location is not None:
+            raise NotImplementedError(
+                "location in list_images is not implemented "
+                "in the OpenStack_2_NodeDriver")
+        if not ex_only_active:
+            raise NotImplementedError(
+                "ex_only_active in list_images is not implemented "
+                "in the OpenStack_2_NodeDriver")
+        response = self.image_connection.request('/v2/images')
+        images = []
+        for image in response.object['images']:
+            images.append(self._to_image(image))
+        return images
+
+    def ex_update_image(self, image_id, data):
+        """
+        Patch a NodeImage. Can be used to set visibility
+
+        :param      image_id: ID of the image which should be used
+        :type       image_id: ``str``
+
+        :param      data: The data to PATCH, either a dict or a list
+        for example: [
+          {'op': 'replace', 'path': '/visibility', 'value': 'shared'}
+        ]
+        :type       data: ``dict|list``
+
+        :rtype: :class:`NodeImage`
+        """
+        response = self.image_connection.request(
+            '/v2/images/%s' % (image_id,),
+            headers={'Content-type': 'application/'
+                                     'openstack-images-'
+                                     'v2.1-json-patch'},
+            method='PATCH', data=data
+        )
+        return self._to_image(response.object)
+
+    def ex_list_image_members(self, image_id):
+        """
+        List all members of an image. See
+        https://developer.openstack.org/api-ref/image/v2/index.html#sharing
+
+        :param      image_id: ID of the image of which the members should
+        be listed
+        :type       image_id: ``str``
+
+        :rtype: ``list`` of :class:`NodeImageMember`
+        """
+        response = self.image_connection.request(
+            '/v2/images/%s/members' % (image_id,)
+        )
+        image_members = []
+        for image_member in response.object['members']:
+            image_members.append(self._to_image_member(image_member))
+        return image_members
+
+    def ex_create_image_member(self, image_id, member_id):
+        """
+        Give a project access to an image.
+
+        The image should have visibility status 'shared'.
+
+        Note that this is not an idempotent operation. If this action is
+        attempted using a tenant that is already in the image members
+        group the API will throw a Conflict (409).
+        See the 'create-image-member' section on
+        https://developer.openstack.org/api-ref/image/v2/index.html
+
+        :param str image_id: The ID of the image to share with the specified
+        tenant
+        :param str member_id: The ID of the project / tenant (the image member)
+        Note that this is the Keystone project ID and not the project name,
+        so something like e2151b1fe02d4a8a2d1f5fc331522c0a
+        :return None:
+
+        :param      image_id: ID of the image to share
+        :type       image_id: ``str``
+
+        :param      project: ID of the project to give access to the image
+        :type       image_id: ``str``
+
+        :rtype: ``list`` of :class:`NodeImageMember`
+        """
+        data = {'member': member_id}
+        response = self.image_connection.request(
+            '/v2/images/%s/members' % image_id,
+            method='POST', data=data
+        )
+        return self._to_image_member(response.object)
+
+    def ex_get_image_member(self, image_id, member_id):
+        """
+        Get a member of an image by id
+
+        :param      image_id: ID of the image of which the member should
+        be listed
+        :type       image_id: ``str``
+
+        :param      member_id: ID of the member to list
+        :type       image_id: ``str``
+
+        :rtype: ``list`` of :class:`NodeImageMember`
+        """
+        response = self.image_connection.request(
+            '/v2/images/%s/members/%s' % (image_id, member_id)
+        )
+        return self._to_image_member(response.object)
+
+    def ex_accept_image_member(self, image_id, member_id):
+        """
+        Accept a pending image as a member.
+
+        This call is idempotent unlike ex_create_image_member,
+        you can accept the same image many times.
+
+        :param      image_id: ID of the image to accept
+        :type       image_id: ``str``
+
+        :param      project: ID of the project to accept the image as
+        :type       image_id: ``str``
+
+        :rtype: ``bool``
+        """
+        data = {'status': 'accepted'}
+        response = self.image_connection.request(
+            '/v2/images/%s/members/%s' % (image_id, member_id),
+            method='PUT', data=data
+        )
+        return self._to_image_member(response.object)
+
+    def _to_networks(self, obj):
+        networks = obj['networks']
+        return [self._to_network(network) for network in networks]
+
+    def _to_network(self, obj):
+        extra = {}
+        if obj.get('router:external', None):
+            extra['router:external'] = obj.get('router:external')
+        if obj.get('subnets', None):
+            extra['subnets'] = obj.get('subnets')
+        return OpenStackNetwork(id=obj['id'],
+                                name=obj['name'],
+                                cidr=None,
+                                driver=self,
+                                extra=extra)
+
+    def ex_list_networks(self):
+        """
+        Get a list of Networks that are available.
+
+        :rtype: ``list`` of :class:`OpenStackNetwork`
+        """
+        response = self.network_connection.request(
+            self._networks_url_prefix).object
+        return self._to_networks(response)
+
+    def _to_subnets(self, obj):
+        subnets = obj['subnets']
+        return [self._to_subnet(subnet) for subnet in subnets]
+
+    def _to_subnet(self, obj):
+        extra = {}
+        if obj.get('router:external', None):
+            extra['router:external'] = obj.get('router:external')
+        if obj.get('subnets', None):
+            extra['subnets'] = obj.get('subnets')
+        return OpenStack_2_SubNet(id=obj['id'],
+                                  name=obj['name'],
+                                  cidr=obj['cidr'],
+                                  driver=self,
+                                  extra=extra)
+
+    def ex_list_subnets(self):
+        """
+        Get a list of Subnet that are available.
+
+        :rtype: ``list`` of :class:`OpenStack_2_SubNet`
+        """
+        response = self.network_connection.request(
+            self._subnets_url_prefix).object
+        return self._to_subnets(response)
+
+    def ex_create_subnet(self, name, network, cidr, ip_version=4):
+        """
+        Create a new Subnet
+
+        :param name: Name of subnet which should be used
+        :type name: ``str``
+
+        :param network: Parent network of the subnet
+        :type network: ``OpenStackNetwork``
+
+        :param cidr: cidr of network which should be used
+        :type cidr: ``str``
+
+        :param ip_version: ip_version of subnet which should be used
+        :type ip_version: ``int``
+
+        :rtype: :class:`OpenStack_2_SubNet`
+        """
+        data = {'subnet': {'cidr': cidr, 'network_id': network.id,
+                           'ip_version': ip_version, 'name': name}}
+        response = self.network_connection.request(
+            self._subnets_url_prefix, method='POST', data=data).object
+        return self._to_subnet(response['subnet'])
+
+    def ex_delete_subnet(self, subnet):
+        """
+        Delete a Subnet
+
+        :param subnet: Subnet which should be deleted
+        :type subnet: :class:`OpenStack_2_SubNet`
+
+        :rtype: ``bool``
+        """
+        resp = self.network_connection.request('%s/%s' % (
+            self._subnets_url_prefix, subnet.id), method='DELETE')
+        return resp.status in (httplib.NO_CONTENT, httplib.ACCEPTED)
+
+    def ex_list_ports(self):
+        """
+        List all OpenStack_2_PortInterfaces
+
+        https://developer.openstack.org/api-ref/network/v2/#list-ports
+
+        :rtype: ``list`` of :class:`OpenStack_2_PortInterface`
+        """
+        response = self._paginated_request(
+            '/v2.0/ports', 'ports', self.network_connection)
+        return [self._to_port(port) for port in response['ports']]
+
+    def ex_delete_port(self, port):
+        """
+        Delete an OpenStack_2_PortInterface
+
+        https://developer.openstack.org/api-ref/network/v2/#delete-port
+
+        :param      port: port interface to remove
+        :type       port: :class:`OpenStack_2_PortInterface`
+
+        :rtype: ``bool``
+         """
+        response = self.network_connection.request(
+            '/v2.0/ports/%s' % port.id, method='DELETE'
+        )
+        return response.success()
+
+    def ex_detach_port_interface(self, node, port):
+        """
+        Detaches an OpenStack_2_PortInterface interface from a Node.
+        :param      node: node
+        :type       node: :class:`Node`
+
+        :param      port: port interface to remove
+        :type       port: :class:`OpenStack_2_PortInterface`
+
+        :rtype: ``bool``
+        """
+        return self.connection.request(
+            '/servers/%s/os-interface/%s' % (node.id, port.id),
+            method='DELETE'
+        ).success()
+
+    def ex_attach_port_interface(self, node, port):
+        """
+        Attaches an OpenStack_2_PortInterface to a Node.
+
+        :param      node: node
+        :type       node: :class:`Node`
+
+        :param      port: port interface to remove
+        :type       port: :class:`OpenStack_2_PortInterface`
+
+        :rtype: ``bool``
+        """
+        data = {
+            'interfaceAttachment': {
+                'port_id': port.id
+            }
+        }
+        return self.connection.request(
+            '/servers/{}/os-interface'.format(node.id),
+            method='POST', data=data
+        ).success()
+
+    def ex_create_port(self, network, description=None,
+                       admin_state_up=True, name=None):
+        """
+        Creates a new OpenStack_2_PortInterface
+
+        :param      network: ID of the network where the newly created
+                    port should be attached to
+        :type       network: :class:`OpenStackNetwork`
+
+        :param      description: Description of the port
+        :type       description: str
+
+        :param      admin_state_up: The administrative state of the
+                    resource, which is up or down
+        :type       admin_state_up: bool
+
+        :param      name: Human-readable name of the resource
+        :type       name: str
+
+        :rtype: :class:`OpenStack_2_PortInterface`
+        """
+        data = {
+            'port':
+                {
+                    'description': description or '',
+                    'admin_state_up': admin_state_up,
+                    'name': name or '',
+                    'network_id': network.id,
+                }
+        }
+        response = self.network_connection.request(
+            '/v2.0/ports', method='POST', data=data
+        )
+        return self._to_port(response.object['port'])
+
+    def ex_get_port(self, port_interface_id):
+        """
+        Retrieve the OpenStack_2_PortInterface with the given ID
+
+        :param      port_interface_id: ID of the requested port
+        :type       port_interface_id: str
+
+        :return: :class:`OpenStack_2_PortInterface`
+        """
+        response = self.network_connection.request(
+            '/v2.0/ports/{}'.format(port_interface_id), method='GET'
+        )
+        return self._to_port(response.object['port'])
+
+    def list_volumes(self):
+        """
+        Get a list of Volumes that are available.
+
+        :rtype: ``list`` of :class:`StorageVolume`
+        """
+        return self._to_volumes(self._paginated_request(
+            '/volumes/detail', 'volumes', self.volumev2_connection))
+
+    def ex_get_volume(self, volumeId):
+        """
+        Retrieve the StorageVolume with the given ID
+
+        :param volumeId: ID of the volume
+        :type volumeId: ``string``
+
+        :return: :class:`StorageVolume`
+        """
+        return self._to_volume(
+            self.volumev2_connection.request('/volumes/%s' % volumeId).object)
+
+    def create_volume(self, size, name, location=None, snapshot=None,
+                      ex_volume_type=None):
+        """
+        Create a new volume.
+
+        :param size: Size of volume in gigabytes (required)
+        :type size: ``int``
+
+        :param name: Name of the volume to be created
+        :type name: ``str``
+
+        :param location: Which data center to create a volume in. If
+                               empty, undefined behavior will be selected.
+                               (optional)
+        :type location: :class:`.NodeLocation`
+
+        :param snapshot:  Snapshot from which to create the new
+                          volume.  (optional)
+        :type snapshot:  :class:`.VolumeSnapshot`
+
+        :param ex_volume_type: What kind of volume to create.
+                            (optional)
+        :type ex_volume_type: ``str``
+
+        :return: The newly created volume.
+        :rtype: :class:`StorageVolume`
+        """
+        volume = {
+            'name': name,
+            'description': name,
+            'size': size,
+            'metadata': {
+                'contents': name,
+            },
+        }
+
+        if ex_volume_type:
+            volume['volume_type'] = ex_volume_type
+
+        if location:
+            volume['availability_zone'] = location
+
+        if snapshot:
+            volume['snapshot_id'] = snapshot.id
+
+        resp = self.volumev2_connection.request('/volumes',
+                                                method='POST',
+                                                data={'volume': volume})
+        return self._to_volume(resp.object)
+
+    def destroy_volume(self, volume):
+        """
+        Delete a Volume.
+
+        :param volume: Volume to be deleted
+        :type  volume: :class:`StorageVolume`
+
+        :rtype: ``bool``
+        """
+        return self.volumev2_connection.request('/volumes/%s' % volume.id,
+                                                method='DELETE').success()
+
+    def ex_list_snapshots(self):
+        """
+        Get a list of Snapshot that are available.
+
+        :rtype: ``list`` of :class:`VolumeSnapshot`
+        """
+        return self._to_snapshots(self._paginated_request(
+            '/snapshots/detail', 'snapshots', self.volumev2_connection))
+
+    def create_volume_snapshot(self, volume, name=None, ex_description=None,
+                               ex_force=True):
+        """
+        Create snapshot from volume
+
+        :param volume: Instance of `StorageVolume`
+        :type  volume: `StorageVolume`
+
+        :param name: Name of snapshot (optional)
+        :type  name: `str` | `NoneType`
+
+        :param ex_description: Description of the snapshot (optional)
+        :type  ex_description: `str` | `NoneType`
+
+        :param ex_force: Specifies if we create a snapshot that is not in
+                         state `available`. For example `in-use`. Defaults
+                         to True. (optional)
+        :type  ex_force: `bool`
+
+        :rtype: :class:`VolumeSnapshot`
+        """
+        data = {'snapshot': {'volume_id': volume.id, 'force': ex_force}}
+
+        if name is not None:
+            data['snapshot']['name'] = name
+
+        if ex_description is not None:
+            data['snapshot']['description'] = ex_description
+
+        return self._to_snapshot(
+            self.volumev2_connection.request('/snapshots', method='POST',
+                                             data=data).object)
+
+    def destroy_volume_snapshot(self, snapshot):
+        """
+        Delete a Volume Snapshot.
+
+        :param snapshot: Snapshot to be deleted
+        :type  snapshot: :class:`VolumeSnapshot`
+
+        :rtype: ``bool``
+        """
+        resp = self.volumev2_connection.request('/snapshots/%s' % snapshot.id,
+                                                method='DELETE')
+        return resp.status in (httplib.NO_CONTENT, httplib.ACCEPTED)
+
+    def ex_list_security_groups(self):
+        """
+        Get a list of Security Groups that are available.
+
+        :rtype: ``list`` of :class:`OpenStackSecurityGroup`
+        """
+        return self._to_security_groups(
+            self.network_connection.request('/v2.0/security-groups').object)
+
+    def ex_create_security_group(self, name, description):
+        """
+        Create a new Security Group
+
+        :param name: Name of the new Security Group
+        :type  name: ``str``
+
+        :param description: Description of the new Security Group
+        :type  description: ``str``
+
+        :rtype: :class:`OpenStackSecurityGroup`
+        """
+        return self._to_security_group(self.network_connection .request(
+            '/v2.0/security-groups', method='POST',
+            data={'security_group': {'name': name, 'description': description}}
+        ).object['security_group'])
+
+    def ex_delete_security_group(self, security_group):
+        """
+        Delete a Security Group.
+
+        :param security_group: Security Group should be deleted
+        :type  security_group: :class:`OpenStackSecurityGroup`
+
+        :rtype: ``bool``
+        """
+        resp = self.network_connection.request('/v2.0/security-groups/%s' %
+                                               (security_group.id),
+                                               method='DELETE')
+        return resp.status == httplib.NO_CONTENT
+
+    def _to_security_group_rule(self, obj):
+        ip_range = group = tenant_id = parent_id = None
+        protocol = from_port = to_port = direction = None
+
+        if 'parent_group_id' in obj:
+            if obj['group'] == {}:
+                ip_range = obj['ip_range'].get('cidr', None)
+            else:
+                group = obj['group'].get('name', None)
+                tenant_id = obj['group'].get('tenant_id', None)
+
+            parent_id = obj['parent_group_id']
+            from_port = obj['from_port']
+            to_port = obj['to_port']
+            protocol = obj['ip_protocol']
+        else:
+            ip_range = obj.get('remote_ip_prefix', None)
+            group = obj.get('remote_group_id', None)
+            tenant_id = obj.get('tenant_id', None)
+
+            parent_id = obj['security_group_id']
+            from_port = obj['port_range_min']
+            to_port = obj['port_range_max']
+            protocol = obj['protocol']
+
+        return OpenStackSecurityGroupRule(
+            id=obj['id'], parent_group_id=parent_id,
+            ip_protocol=protocol, from_port=from_port,
+            to_port=to_port, driver=self, ip_range=ip_range,
+            group=group, tenant_id=tenant_id, direction=direction)
+
+    def ex_create_security_group_rule(self, security_group, ip_protocol,
+                                      from_port, to_port, cidr=None,
+                                      source_security_group=None):
+        """
+        Create a new Rule in a Security Group
+
+        :param security_group: Security Group in which to add the rule
+        :type  security_group: :class:`OpenStackSecurityGroup`
+
+        :param ip_protocol: Protocol to which this rule applies
+                            Examples: tcp, udp, ...
+        :type  ip_protocol: ``str``
+
+        :param from_port: First port of the port range
+        :type  from_port: ``int``
+
+        :param to_port: Last port of the port range
+        :type  to_port: ``int``
+
+        :param cidr: CIDR notation of the source IP range for this rule
+        :type  cidr: ``str``
+
+        :param source_security_group: Existing Security Group to use as the
+                                      source (instead of CIDR)
+        :type  source_security_group: L{OpenStackSecurityGroup
+
+        :rtype: :class:`OpenStackSecurityGroupRule`
+        """
+        source_security_group_id = None
+        if type(source_security_group) == OpenStackSecurityGroup:
+            source_security_group_id = source_security_group.id
+
+        return self._to_security_group_rule(self.network_connection.request(
+            '/v2.0/security-group-rules', method='POST',
+            data={'security_group_rule': {
+                'direction': 'ingress',
+                'protocol': ip_protocol,
+                'port_range_min': from_port,
+                'port_range_max': to_port,
+                'remote_ip_prefix': cidr,
+                'remote_group_id': source_security_group_id,
+                'security_group_id': security_group.id}}
+        ).object['security_group_rule'])
+
+    def ex_delete_security_group_rule(self, rule):
+        """
+        Delete a Rule from a Security Group.
+
+        :param rule: Rule should be deleted
+        :type  rule: :class:`OpenStackSecurityGroupRule`
+
+        :rtype: ``bool``
+        """
+        resp = self.network_connection.request(
+            '/v2.0/security-group-rules/%s' % (rule.id), method='DELETE')
+        return resp.status == httplib.NO_CONTENT
+
+    def _to_floating_ip_pool(self, obj):
+        return OpenStack_2_FloatingIpPool(obj['id'], obj['name'],
+                                          self.network_connection)
+
+    def _to_floating_ip_pools(self, obj):
+        pool_elements = obj['networks']
+        return [self._to_floating_ip_pool(pool) for pool in pool_elements]
+
+    def ex_list_floating_ip_pools(self):
+        """
+        List available floating IP pools
+
+        :rtype: ``list`` of :class:`OpenStack_2_FloatingIpPool`
+        """
+        return self._to_floating_ip_pools(
+            self.network_connection.request('/v2.0/networks?router:external'
+                                            '=True&fields=id&fields='
+                                            'name').object)
 
 
 class OpenStack_1_1_FloatingIpPool(object):
@@ -2636,7 +3588,7 @@ class OpenStack_1_1_FloatingIpPool(object):
         Delete specified floating IP from the pool
 
         :param      ip: floating IP to remove
-        :type       ip::class:`OpenStack_1_1_FloatingIpAddress`
+        :type       ip: :class:`OpenStack_1_1_FloatingIpAddress`
 
         :rtype: ``bool``
         """
@@ -2675,3 +3627,169 @@ class OpenStack_1_1_FloatingIpAddress(object):
         return ('<OpenStack_1_1_FloatingIpAddress: id=%s, ip_addr=%s,'
                 ' pool=%s, driver=%s>'
                 % (self.id, self.ip_address, self.pool, self.driver))
+
+
+class OpenStack_2_FloatingIpPool(object):
+    """
+    Floating IP Pool info.
+    """
+
+    def __init__(self, id, name, connection):
+        self.id = id
+        self.name = name
+        self.connection = connection
+
+    def _to_floating_ips(self, obj):
+        ip_elements = obj['floatingips']
+        return [self._to_floating_ip(ip) for ip in ip_elements]
+
+    def _to_floating_ip(self, obj):
+        instance_id = None
+
+        # In neutron version prior to 13.0.0 port_details does not exists
+        if 'port_details' not in obj and 'port_id' in obj and obj['port_id']:
+            port = self.connection.driver.ex_get_port(obj['port_id'])
+            if port:
+                obj['port_details'] = {"device_id": port.extra["device_id"],
+                                       "device_owner":
+                                           port.extra["device_owner"],
+                                       "mac_address":
+                                           port.extra["mac_address"]}
+
+        if 'port_details' in obj and obj['port_details']:
+            if obj['port_details']['device_owner'] == 'compute:nova':
+                instance_id = obj['port_details']['device_id']
+
+        ip_address = obj['floating_ip_address']
+        return OpenStack_1_1_FloatingIpAddress(id=obj['id'],
+                                               ip_address=ip_address,
+                                               pool=self,
+                                               node_id=instance_id,
+                                               driver=self.connection.driver)
+
+    def list_floating_ips(self):
+        """
+        List floating IPs in the pool
+
+        :rtype: ``list`` of :class:`OpenStack_1_1_FloatingIpAddress`
+        """
+        return self._to_floating_ips(
+            self.connection.request('/v2.0/floatingips').object)
+
+    def get_floating_ip(self, ip):
+        """
+        Get specified floating IP from the pool
+
+        :param      ip: floating IP to get
+        :type       ip: ``str``
+
+        :rtype: :class:`OpenStack_1_1_FloatingIpAddress`
+        """
+        floating_ips = self._to_floating_ips(
+            self.connection.request('/v2.0/floatingips?floating_ip_address'
+                                    '=%s' % ip).object)
+        return floating_ips[0]
+
+    def create_floating_ip(self):
+        """
+        Create new floating IP in the pool
+
+        :rtype: :class:`OpenStack_1_1_FloatingIpAddress`
+        """
+        resp = self.connection.request('/v2.0/floatingips',
+                                       method='POST',
+                                       data={'floatingip':
+                                             {'floating_network_id': self.id}}
+                                       )
+        data = resp.object['floatingip']
+        id = data['id']
+        ip_address = data['floating_ip_address']
+        return OpenStack_1_1_FloatingIpAddress(id=id,
+                                               ip_address=ip_address,
+                                               pool=self,
+                                               node_id=None,
+                                               driver=self.connection.driver)
+
+    def delete_floating_ip(self, ip):
+        """
+        Delete specified floating IP from the pool
+
+        :param      ip: floating IP to remove
+        :type       ip: :class:`OpenStack_1_1_FloatingIpAddress`
+
+        :rtype: ``bool``
+        """
+        resp = self.connection.request('/v2.0/floatingips/%s' % ip.id,
+                                       method='DELETE')
+        return resp.status in (httplib.NO_CONTENT, httplib.ACCEPTED)
+
+    def __repr__(self):
+        return ('<OpenStack_2_FloatingIpPool: name=%s>' % self.name)
+
+
+class OpenStack_2_SubNet(object):
+    """
+    A Virtual SubNet.
+    """
+
+    def __init__(self, id, name, cidr, driver, extra=None):
+        self.id = str(id)
+        self.name = name
+        self.cidr = cidr
+        self.driver = driver
+        self.extra = extra or {}
+
+    def __repr__(self):
+        return '<OpenStack_2_SubNet id="%s" name="%s" cidr="%s">' % (self.id,
+                                                                     self.name,
+                                                                     self.cidr)
+
+
+class OpenStack_2_PortInterface(UuidMixin):
+    """
+    Port Interface info. Similar in functionality to a floating IP (can be
+    attached / detached from a compute instance) but implementation-wise a
+    bit different.
+
+    > A port is a connection point for attaching a single device, such as the
+    > NIC of a server, to a network. The port also describes the associated
+    > network configuration, such as the MAC and IP addresses to be used on
+    > that port.
+    https://docs.openstack.org/python-openstackclient/pike/cli/command-objects/port.html
+
+    Also see:
+    https://developer.openstack.org/api-ref/compute/#port-interfaces-servers-os-interface
+    """
+
+    def __init__(self, id, state, driver, created=None, extra=None):
+        """
+        :param id: Port Interface ID.
+        :type id: ``str``
+        :param state: State of the OpenStack_2_PortInterface.
+        :type state: :class:`.OpenStack_2_PortInterfaceState`
+        :param      created: A datetime object that represents when the
+                             port interface was created
+        :type       created: ``datetime.datetime``
+        :param extra: Optional provided specific attributes associated with
+                      this image.
+        :type extra: ``dict``
+        """
+        self.id = str(id)
+        self.state = state
+        self.driver = driver
+        self.created = created
+        self.extra = extra or {}
+        UuidMixin.__init__(self)
+
+    def delete(self):
+        """
+        Delete this Port Interface
+
+        :rtype: ``bool``
+        """
+        return self.driver.ex_delete_port(self)
+
+    def __repr__(self):
+        return (('<OpenStack_2_PortInterface: id=%s, state=%s, '
+                 'driver=%s  ...>')
+                % (self.id, self.state, self.driver.name))

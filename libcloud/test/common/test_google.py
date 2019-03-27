@@ -42,9 +42,9 @@ from libcloud.utils.py3 import httplib
 
 # Skip some tests if cryptography is unavailable
 try:
-    import cryptography
+    from cryptography.hazmat.primitives.hashes import SHA256
 except ImportError:
-    cryptography = None
+    SHA256 = None
 
 
 SCRIPT_PATH = os.path.dirname(os.path.realpath(__file__))
@@ -60,7 +60,9 @@ GCE_PARAMS_JSON_KEY = ('email@developer.gserviceaccount.com', JSON_KEY)
 GCE_PARAMS_KEY = ('email@developer.gserviceaccount.com', KEY_STR)
 GCE_PARAMS_IA = ('client_id', 'client_secret')
 GCE_PARAMS_GCE = ('foo', 'bar')
-GCS_S3_PARAMS = ('GOOG0123456789ABCXYZ',  # GOOG + 16 alphanumeric chars
+GCS_S3_PARAMS_20 = ('GOOG0123456789ABCXYZ',  # GOOG + 16 alphanumeric chars
+                 '0102030405060708091011121314151617181920')  # 40 base64 chars
+GCS_S3_PARAMS_24 = ('GOOGDF5OVRRGU4APFNSTVCXI',  # GOOG + 20 alphanumeric chars
                  '0102030405060708091011121314151617181920')  # 40 base64 chars
 
 STUB_UTCNOW = _utcnow()
@@ -230,7 +232,10 @@ class GoogleAuthTypeTest(GoogleTestCase):
             self.assertEqual(GoogleAuthType.guess_type(GCE_PARAMS[0]),
                              GoogleAuthType.SA)
             self.assertEqual(
-                GoogleAuthType.guess_type(GCS_S3_PARAMS[0]),
+                GoogleAuthType.guess_type(GCS_S3_PARAMS_20[0]),
+                GoogleAuthType.GCS_S3)
+            self.assertEqual(
+                GoogleAuthType.guess_type(GCS_S3_PARAMS_24[0]),
                 GoogleAuthType.GCS_S3)
             self.assertEqual(GoogleAuthType.guess_type(GCE_PARAMS_GCE[0]),
                              GoogleAuthType.GCE)
@@ -284,7 +289,7 @@ class GoogleOAuth2CredentialTest(GoogleTestCase):
 
         kwargs = {}
 
-        if cryptography:
+        if SHA256:
             kwargs['auth_type'] = GoogleAuthType.SA
             cred1 = GoogleOAuth2Credential(*GCE_PARAMS_PEM_KEY, **kwargs)
             self.assertTrue(isinstance(cred1.oauth2_conn,

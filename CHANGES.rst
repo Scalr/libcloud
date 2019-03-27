@@ -1,8 +1,301 @@
 ﻿Changelog
 =========
 
-Changes in Apach Libcloud in development
-----------------------------------------
+Changes in Apache Libcloud in development
+-----------------------------------------
+
+General
+~~~~~~~
+
+- [NTT CIS] Add loadbalancer and compute drivers for NTT-CIS, rename dimensiondata modules to NTT-CIS (GITHUB-1250)
+  [Mitch Raful]
+
+- [NTT CIS] Fix loadbalancer docs (GITHUB-1270)
+  [Mitch Raful]
+
+- Use assertIsNone instead of assertEqual with None in tests (GITHUB-1264)
+  [Ken Dreyer]
+  
+- Updating command line arguments to current version in Azure examples (GITHUB-1273) [mitar]
+
+- [GCE, SoftLayer] Update GCE and Softlayer drivers to utilize crypto
+  primitives from the ``cryptography`` library instead of deprecated and
+  unmaintained ``PyCrypto`` library.
+  
+  (GITHUB-1280)
+  [Ryan Petrello]
+
+Common
+~~~~~~
+
+- [OpenStack] Handle missing user enabled attribute (GITHUB-1261)
+  [Ken Dreyer]
+
+- [Google Cloud Storage] Handle Interoperability access keys of more than 20 characters (GITHUB-1272)
+  [Yoan Tournade]
+
+Compute
+~~~~~~~
+
+- [OpenStack] Implement OpenStack_1_1_NodeDriver ex_get_snapshot (GITHUB-1257)
+  [Rick van de Loo]
+
+- [OpenStack] Pagination in various OpenStack_2_NodeDriver methods (GITHUB-1263)
+  [Rick van de Loo]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver ex_create_subnet (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver ex_delete_subnet (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver list_volumes (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver ex_get_volume (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver create_volume (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver destroy_volume (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver ex_list_snapshots (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver create_volume_snapshot (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver destroy_volume_snapshot (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver ex_list_security_groups (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver ex_create_security_group (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver ex_delete_security_group (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver ex_create_security_group_rule (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver ex_delete_security_group_rule (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Implement OpenStack_2_NodeDriver ex_list_floating_ip_pools (LIBCLOUD-874, GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Fix parse_error if 'code' not in API response message (GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Adapt _to_port function to work with old OpenStack versions (GITHUB-1242)
+  [Miguel Caballer]
+
+- [OpenStack] Use SUSPENDED NodeState in OpenStack driver (GITHUB-1269)
+  [Miguel Caballer]
+
+- [UpCloud] Update documentation for UpCloud driver (LIBCLOUD-1026, GITHUB-1259)
+  [Ilari Mäkelä]
+
+- [NTT CIS] Fix indenting in ex_initiate_drs_failover docstring (GITHUB-1271)
+  [Rick van de Loo]
+
+- [NTT CIS] Change endpoint 'canada' to 'ca' in libcloud/common/nttcis.py (GITHUB-1270)
+  [Mitch Raful]
+
+Container
+~~~~~~~~~
+
+- [Docker] Improve docstring for RegistryClient (GITHUB-1254)
+  [Ken Dreyer]
+
+DNS
+~~~
+
+- Add new driver for RcodeZero DNS (GITHUB-1256, LIBCLOUD-1025) [MikeAT]
+
+Storage
+~~~~~~~
+
+- Adds missing docs for param ex_prefix & adds to DummyStore. Add ex_prefix kwarg to the `list_container_objects` methods in the base and dummy classes. (GITHUB-1275) [RichardARPANET]
+
+Changes in Apache Libcloud 2.4.0
+--------------------------------
+
+- Refuse installation with Python 2.6 and Python 3.3 (support was
+  already dropped in Libcloud 2.3.0)
+
+- Support Python 3.7 (GITHUB-1227, GITHUB-1236)
+  [Andreas Hasenack, Andrew Starr-Bochicchio, Quentin Pradet]
+
+- Cleanup various Python files
+  (GITHUB-1182, GITHUB-1183, GITHUB-1185, GITHUB-1186, GITHUB-1187, GITHUB-1188)
+  [Rémy Léone]
+
+- Allow running tests with http_proxy set (GITHUB-1236)
+  [Andreas Hasenack]
+
+Common
+~~~~~~
+
+- [OpenStack] Document openstack_connection_kwargs method (GITHUB-1219)
+  [Ken Dreyer]
+
+- [OpenStack] Handle missing user email in OpenStackIdentityUser (GITHUB-1249)
+  [Ken Dreyer]
+
+Compute
+~~~~~~~
+
+- [ARM] Support OS disk size definition on node creation (GITHUB-1196)
+  [Vojta Bartoš]
+
+- [Digital Ocean] Support floating IPs (GITHUB-1177)
+  [Rick van de Loo]
+
+- [Digital Ocean] Support attach/detach for floating IPs (GITHUB-1191)
+  [Rick van de Loo]
+
+- [Digital Ocean] Add ex_get_node_details (GITHUB-1221)
+  [Rick van de Loo]
+
+- [Digital Ocean] Add tags extra attribute to create_node (GITHUB-1212)
+  [Nikita Chebykin]
+
+- [Dimension Data] Fix IndexError in list_images (GITHUB-1171)
+  [Adam Friedman]
+
+- [EC2] Add AWS eu-west-3 (Paris) region (GITHUB-1175)
+  [Anthony Monthe]
+
+- [EC2] Add description to ex_authorize_security_group_ingress (GITHUB-1122)
+  [Arturo Noha]
+
+- [EC2] Added script to automatically get EC2 instance sizes (GITHUB-1211)
+  [Anthony Monthe, Quentin Pradet]
+
+- [EC2] Update instance sizes (GITHUB-1238)
+  [Ward Vandewege]
+
+- [EC2] Accept tags when create a snapshot (LIBCLOUD-1014, GITHUB-1240)
+  [Rafael Gonçalves]
+
+- [GCE] Expand Firewall options coverage (LIBCLOUD-960, GITHUB-1144)
+  [maxlip]
+
+- [GCE] Expand network and subnetwork options coverage (LIBCLOUD-985, GITHUB-1181)
+  [maxlip]
+
+- [GCE] Extend ex_create_address to allow internal ip creation (GITHUB-1174)
+  [Jeremy Solarz]
+
+- [GCE] Allow shared VPC in managed instance group creation (GITHUB-1179)
+  [Boris Chazalet]
+
+- [GCE] Support disk_size parameter for boot disk when creating instance
+  (LIBCLOUD-973, GITHUB-1162)
+  [Rahul Paigavan]
+
+- [GCE] Update public image projects list (LIBCLOUD-961, GITHUB-1143)
+  [Sean Marlow]
+
+- [GCE] Fix _find_zone_or_region for >500 instances (GITHUB-1203)
+  [Léo Ferlin-Sutton]
+
+- [GCE] Allow routing_mode=None in ex_create_network (GITHUB-1217)
+  [Daniel Hunsaker]
+
+- [OpenStack] Implement Glance Image API v2 (GITHUB-1151)
+  [Rick van de Loo]
+
+- [OpenStack] Fix spelling in ex_files description (GITHUB-1197)
+  [Ken Dreyer]
+
+- [OpenStack v2] Allow listing image members (GITHUB-1172)
+  [Rick van de Loo]
+
+- [OpenStack v2] Allow creating and accepting image members (GITHUB-1176)
+  [Rick van de Loo]
+
+- [OpenStack v2] Fix image members methods (GITHUB-1190)
+  [Rick van de Loo]
+
+- [OpenStack] Fix API doc for delete_floating_ip (GITHUB-1218)
+  [Ken Dreyer]
+
+- [OpenStack] Implement port attaching/detaching (GITHUB-1225)
+  [Rick van de Loo]
+
+- [OpenStack] Add methods for getting and creating ports (GITHUB-1226)
+  [Alexander Grooff]
+
+- [OpenStack] Add get_user method (GITHUB-1216)
+  [Ken Dreyer]
+
+- [OpenStack] Add ex_list_subnets to OpenStack_2_NodeDriver (GITHUB-1215, LIBCLOUD-604)
+  [Miguel Caballer]
+
+- [OpenStack] The OpenStack_2_NodeDriver uses two connections (GITHUB-1215, LIBCLOUD-997)
+  [Miguel Caballer]
+
+- [OpenStack] The OpenStack_2_NodeDriver /v2.0/networks instead of /os-networks (GITHUB-1215, LIBCLOUD-998)
+  [Miguel Caballer]
+
+- [Scaleway] New Scaleway driver (GITHUB-1121, GITHUB-1220)
+  [Daniel Hunsaker, Nándor István Krácser, Rémy Léone]
+
+- [Scaleway] Update Scaleway default API host (GITHUB-1239)
+  [Rémy Léone]
+
+DNS
+~~~
+
+- [Google Cloud DNS] Document driver instantiation (GITHUB-1198)
+  [Gareth McFarlane]
+
+Storage
+~~~~~~~
+
+- Update docstring for storage provider class (GITHUB-1201)
+  [Clemens Wolff]
+
+- [Azure Blob Storage] Allow filtering lists by prefix (LIBCLOUD-986, GITHUB-1193)
+  [Joshua Hawkinson]
+
+- [Azure Blob Storage] Update driver documentation (GITHUB-1208)
+  [Clemens Wolff]
+
+- [Azure Blob Storage] Fix upload/download streams (GITHUB-1231)
+  [Michael Perel]
+
+- [Azure Blob Storage] Fix PageBlob headers (GITHUB-1237)
+  [Andreas Hasenack]
+
+- [S3] Guess s3 upload content type (LIBCLOUD-958, GITHUB-1195)
+  [Iuri de Silvio]
+
+- [S3] Add Amazon S3 (cn-northwest-1) Storage Driver (GITHUB-1241)
+  [@yangkang55]
+
+Other
+~~~~~
+
+- Fixed spelling in 2.0 changes documentation (GITHUB-1228)
+  [Jimmy Casey]
+
+Changes in Apache Libcloud 2.3.0
+--------------------------------
+
+- Drop support for Python 2.6 and Python 3.3
+  They're no longer supported, and the Python ecosystem is starting to
+  drop support: two of our test dependencies no longer support them.
+  [Quentin Pradet]
+
+- Made pytest-runner optional (GITHUB-1167)
+  [Vlad Glagolev]
 
 Common
 ~~~~~~
@@ -10,35 +303,23 @@ Common
 - Improve warning when CA_CERTS_PATH is incorrectly passed as a list (GITHUB-1118)
   [Quentin Pradet]
 
+- Cleaned up and corrected third-party drivers documentation (GITHUB-1148)
+  [Daniel Hunsaker]
+
+- Modernized a few Python examples (GITHUB-1164)
+  [Batuhan Osman Taşkaya]
+
+- [OpenStack] Authentify with updated Identity API
+  (LIBCLOUD-965, GITHUB-1145)
+  [Miguel Caballer]
+
 Compute
 ~~~~~~~
 
-- [GCE] Allow adding labels to images (GITHUB-1138)
-  [Katriel Traum, Eric Johnson]
-
-- [GCE] Allow adding license strings to images (GITHUB-1136)
-  [Katriel Traum, Eric Johnson]
-
-- [UpCloud] New driver for UpCloud (LIBCLOUD-938, GITHUB-1102)
-  [Mika Lackman, Ilari Mäkelä]
-
-- [EC2] Add new x1.16xlarge and x1e.32xlarge instance type. (GITHUB-1101)
-  [Anthony Monthe]
-
-- [EC2] Add AWS EC2 c5 series (GITHUB-1147)
-  [Anthony Monthe]
-
-- [EC2] Update pricing information for EC2 instances.
-  [Tomaz Muraus]
-
-- Update ProfitBricks driver and add support for the new API v4. (GITHUB-1103)
-  [Nurfet Becirevic]
-
-- [GCE] Support GCE node labels. (LIBCLOUD-934, GITHUB-1115)
-  [@maxlip]
-
-- [GCE] Fix `GCEList` pagination. (GITHUB-1095)
-  [Yap Sok Ann]
+- Fix "wait_until_running() method so it also works correctly and doesn't
+  append "None" to the addresses list if node has no IP address.
+  (GITHUB-1156, LIBCLOUD-971)
+  [Tobias Paepke]
 
 - [ARM] Fix checking for "location is None" in several functions (LIBCLOUD-926, GITHUB-1098)
   [Sameh Elsharkawy]
@@ -46,19 +327,8 @@ Compute
 - [ARM] Fix error when using SSH key auth with Python 3 (GITHUB-1098)
   [Sameh Elsharkawy]
 
-- [GCE] Allow setting service account in instance templates (LIBCLOUD-947, GITHUB-1108)
-  [Evan Carter]
-
 - [ARM] Fix API call on powerOff, understand PAUSED state (GITHUB-1003)
   [Markos Gogoulos]
-
-- [UpCloud] Use disk size and storage tier also when creating node from template
-  (LIBCLOUD-952, GITHUB-1124)
-  [Mika Lackman]
-
-- [UpCloud] Allow to define hostname and username
-  (LIBCLOUD-951, LIBCLOUD-953, GITHUB-1123, GITHUB-1125)
-  [Mika Lackman]
 
 - [ARM] Delete VHDs more reliably in destroy_node(), raise exception on unhandled errors
   (GITHUB-1120)
@@ -71,26 +341,99 @@ Compute
   (GITHUB-1126)
   [Peter Amstutz, Lucas Di Pentima]
 
-- [EC2] Allow cn-north-1 even without pricing information
-  (LIBCLOUD-954, GITHUB-1127)
-  [Quentin Pradet]
-
-- [Digital Ocean] Add ex_enable_ipv6 in DigitalOcean_v2 driver
-  (GITHUB-1130)
-  [Rick van de Loo]
-
-- [EC2] Fix EBS volume encryption (GITHUB-1008)
-  [Sergey Babak]
-
-- [GCE] Add support for private IP addresses in GCE instance creation
-  (LIBCLOUD-944, GITHUB-1107)
-  [Gareth Mcfarlane]
-
 - [ARM] Fix delete_old_vhd (GITHUB-1137)
   [Peter Amstutz, Lucas Di Pentima]
 
 - [ARM] Limit number of retries in destroy_node (GITHUB-1134)
   [Peter Amstutz, Lucas Di Pentima]
+
+- [ARM] Fix Retry-After header handling (GITHUB-1139)
+  [Lucas Di Pentima]
+
+- [CloudStack] Handle NICs without addresses (GITHUB-1141)
+  [Pierre-Yves Ritschard]
+
+- [CloudStack] Add change size and restore (LIBCLOUD-975, GITHUB-1166)
+  [Mauro Murari]
+
+- [Digital Ocean] Add ex_enable_ipv6 in DigitalOcean_v2 driver
+  (GITHUB-1130)
+  [Rick van de Loo]
+
+- [Digital Ocean] Add support for tags in list_nodes()
+  (LIBCLOUD-967, GITHUB-1149)
+  [Mike Fischer]
+
+- [Digital Ocean] Add rebuild and resize commands
+  (LIBCLOUD-977, GITHUB-1169)
+  [Adam Wight]
+
+- [EC2] Add new x1.16xlarge and x1e.32xlarge instance type. (GITHUB-1101)
+  [Anthony Monthe]
+
+- [EC2] Add AWS EC2 c5 series (GITHUB-1147)
+  [Anthony Monthe]
+
+- [EC2] Add AWS EC2 M5 sizes (GITHUB-1159)
+  [Anthony Monthe]
+
+- [EC2] Update pricing information for EC2 instances.
+  [Tomaz Muraus]
+
+- [EC2] Allow cn-north-1 even without pricing information
+  (LIBCLOUD-954, GITHUB-1127)
+  [Quentin Pradet]
+
+- [EC2] Fix EBS volume encryption (GITHUB-1008)
+  [Sergey Babak]
+
+- [ECS Aliyun] Support modify_security_group_attributes (GITHUB-1157)
+  [Zhang Yiming]
+
+- [GCE] Allow adding labels to images (GITHUB-1138)
+  [Katriel Traum, Eric Johnson]
+
+- [GCE] Allow adding license strings to images (GITHUB-1136)
+  [Katriel Traum, Eric Johnson]
+
+- [GCE] Support GCE node labels. (LIBCLOUD-934, GITHUB-1115)
+  [@maxlip]
+
+- [GCE] Fix `GCEList` pagination. (GITHUB-1095)
+  [Yap Sok Ann]
+
+- [GCE] Allow setting service account in instance templates (LIBCLOUD-947, GITHUB-1108)
+  [Evan Carter]
+
+- [GCE] Add support for private IP addresses in GCE instance creation
+  (LIBCLOUD-944, GITHUB-1107)
+  [Gareth Mcfarlane]
+
+- [GCE] Allow for use of shared network (VPC) and subnetwork (GITHUB-1165)
+  [Boris Chazalet]
+
+- [GCE] Add support for accelerators (LIBCLOUD-963, GITHUB-1163)
+  [Michael Johnson]
+
+- [ProfitBricks] Update driver and add support for the new API v4. (GITHUB-1103)
+  [Nurfet Becirevic]
+
+- [ProfitBricks] Fix list_snapshots() method (GITHUB-1153)
+  [Chad Phillips]
+
+- [UpCloud] New driver for UpCloud (LIBCLOUD-938, GITHUB-1102)
+  [Mika Lackman, Ilari Mäkelä]
+
+- [UpCloud] Use disk size and storage tier also when creating node from template
+  (LIBCLOUD-952, GITHUB-1124)
+  [Mika Lackman]
+
+- [UpCloud] Allow to define hostname and username
+  (LIBCLOUD-951, LIBCLOUD-953, GITHUB-1123, GITHUB-1125)
+  [Mika Lackman]
+
+- [UpCloud] Add pricing information to list_sizes (LIBCLOUD-969, GITHUB-1152)
+  [Mika Lackman]
 
 Storage
 ~~~~~~~
@@ -98,6 +441,25 @@ Storage
 - Added Digital Ocean Spaces driver (LIBCLOUD-955, GITHUB-1129)
   [Andrew Starr-Bochicchio]
 
+- [Digital Ocean Spaces] Add support for AMS3 region (GITHUB-1142)
+  [Andrew Starr-Bochicchio]
+
+- [Digital Ocean Spaces] Add support for SGP1 region (GITHUB-1168)
+  [Andrew Starr-Bochicchio]
+
+- Fix a bug / regression which resulted in increased memory consumption when
+  using ``download_object`` method. This method would store whole object
+  content in memory even though there was no need for that.
+
+  This regression was introduced in 2.0.0 when we moved to using ``requests``
+  library.
+  (GITHUB-1132)
+  [Quentin Pradet]
+
+- Fix a regression with hash computation performance and memory usage on object
+  upload inadvertently introduced in 2.0.0 and make it more efficient.
+  (GITHUB-1135)
+  [Quentin Pradet]
 
 Changes in Apache Libcloud 2.2.1
 --------------------------------

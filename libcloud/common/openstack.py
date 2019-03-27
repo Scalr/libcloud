@@ -156,6 +156,7 @@ class OpenStackBaseConnection(ConnectionUserAndKey):
         if ex_force_auth_version:
             self._auth_version = ex_force_auth_version
 
+        self.base_url = ex_force_base_url
         self._ex_force_base_url = ex_force_base_url
         self._ex_force_auth_url = ex_force_auth_url
         self._ex_force_auth_token = ex_force_auth_token
@@ -394,7 +395,8 @@ class OpenStackResponse(Response):
             driver = self.connection.driver
             key_pair_name = context.get('key_pair_name', None)
 
-            if len(values) > 0 and values[0]['code'] == 404 and key_pair_name:
+            if len(values) > 0 and 'code' in values[0] and \
+                    values[0]['code'] == 404 and key_pair_name:
                 raise KeyPairDoesNotExistError(name=key_pair_name,
                                                driver=driver)
             elif len(values) > 0 and 'message' in values[0]:
@@ -438,6 +440,7 @@ class OpenStackDriverMixin(object):
 
     def openstack_connection_kwargs(self):
         """
+        Returns certain ``ex_*`` parameters for this connection.
 
         :rtype: ``dict``
         """

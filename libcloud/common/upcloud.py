@@ -1,3 +1,4 @@
+
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.
@@ -26,29 +27,21 @@ class UpcloudTimeoutException(LibcloudError):
 class UpcloudCreateNodeRequestBody(object):
     """
     Body of the create_node request
-
     Takes the create_node arguments (**kwargs) and constructs the request body
-
     :param      name: Name of the created server (required)
     :type       name: ``str``
-
     :param      size: The size of resources allocated to this node.
     :type       size: :class:`.NodeSize`
-
     :param      image: OS Image to boot on node.
     :type       image: :class:`.NodeImage`
-
     :param      location: Which data center to create a node in. If empty,
                         undefined behavior will be selected. (optional)
     :type       location: :class:`.NodeLocation`
-
     :param      auth: Initial authentication information for the node
                             (optional)
     :type       auth: :class:`.NodeAuthSSHKey`
-
     :param      ex_hostname: Hostname. Default is 'localhost'. (optional)
     :type       ex_hostname: ``str``
-
     :param ex_username: User's username, which is created.
                         Default is 'root'. (optional)
     :type ex_username: ``str``
@@ -71,7 +64,6 @@ class UpcloudCreateNodeRequestBody(object):
     def to_json(self):
         """
         Serializes the body to json
-
         :return: JSON string
         :rtype: ``str``
         """
@@ -83,14 +75,11 @@ class UpcloudNodeDestroyer(object):
     Helper class for destroying node.
     Node must be first stopped and then it can be
     destroyed
-
     :param  upcloud_node_operations: UpcloudNodeOperations instance
     :type   upcloud_node_operations: :class:`.UpcloudNodeOperations`
-
     :param  sleep_func: Callable function, which sleeps.
         Takes int argument to sleep in seconds (optional)
     :type   sleep_func: ``function``
-
     """
 
     WAIT_AMOUNT = 2
@@ -104,7 +93,6 @@ class UpcloudNodeDestroyer(object):
     def destroy_node(self, node_id):
         """
         Destroys the given node.
-
         :param  node_id: Id of the Node.
         :type   node_id: ``int``
         """
@@ -145,7 +133,6 @@ class UpcloudNodeDestroyer(object):
 class UpcloudNodeOperations(object):
     """
     Helper class to start and stop node.
-
     :param  conneciton: Connection instance
     :type   connection: :class:`.UpcloudConnection`
     """
@@ -156,7 +143,6 @@ class UpcloudNodeOperations(object):
     def stop_node(self, node_id):
         """
         Stops the node
-
         :param  node_id: Id of the Node
         :type   node_id: ``int``
         """
@@ -172,10 +158,8 @@ class UpcloudNodeOperations(object):
     def get_node_state(self, node_id):
         """
         Get the state of the node.
-
         :param  node_id: Id of the Node
         :type   node_id: ``int``
-
         :rtype: ``str``
         """
 
@@ -191,12 +175,41 @@ class UpcloudNodeOperations(object):
     def destroy_node(self, node_id):
         """
         Destroys the node.
-
         :param  node_id: Id of the Node
         :type   node_id: ``int``
         """
         self.connection.request('1.2/server/{0}'.format(node_id),
                                 method='DELETE')
+
+
+class PlanPrice(object):
+    """
+    Helper class to construct plan price in different zones
+    :param  zone_prices: List of prices in different zones in UpCloud
+    :type   zone_prices: ```list```
+    """
+
+    def __init__(self, zone_prices):
+        self._zone_prices = zone_prices
+
+    def get_price(self, plan_name, location=None):
+        """
+        Returns the plan's price in location. If location
+        is not provided returns None
+        :param  plan_name: Name of the plan
+        :type   plan_name: ```str```
+        :param  location: Location, which price is returned (optional)
+        :type   location: :class:`.NodeLocation`
+        rtype: ``float``
+        """
+        if location is None:
+            return None
+        server_plan_name = 'server_plan_' + plan_name
+
+        for zone_price in self._zone_prices:
+            if zone_price['name'] == location.id:
+                return zone_price.get(server_plan_name, {}).get('price')
+        return None
 
 
 class _LoginUser(object):

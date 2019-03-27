@@ -26,7 +26,9 @@ import warnings
 import time
 
 from libcloud.utils import misc as misc_utils
+from libcloud.utils.py3 import ET
 from libcloud.utils.py3 import b, basestring, ensure_string
+
 from libcloud.utils.xml import fixxpath, findtext, findattr, findall
 from libcloud.utils.publickey import get_pubkey_ssh2_fingerprint
 from libcloud.utils.publickey import get_pubkey_comment
@@ -43,6 +45,7 @@ from libcloud.compute.base import NodeImage, StorageVolume, VolumeSnapshot
 from libcloud.compute.base import KeyPair, BaseDriver
 from libcloud.compute.types import NodeState, KeyPairDoesNotExistError, \
     StorageVolumeState, VolumeSnapshotState
+from libcloud.compute.constants import INSTANCE_TYPES, REGION_DETAILS
 
 __all__ = [
     'API_VERSION',
@@ -99,6 +102,18 @@ OUTSCALE_NAMESPACE = 'http://api.outscale.com/wsdl/fcuext/2014-04-15/'
 DEFAULT_EFS_API_VERSION = '2015-02-01'
 EFS_NAMESPACE = 'elasticfilesystem.%s.amazonaws.com'
 
+# Add Nimbus region
+REGION_DETAILS['nimbus'] = {
+    # Nimbus clouds have 3 EC2-style instance types but their particular
+    # RAM allocations are configured by the admin
+    'country': 'custom',
+    'signature_version': '2',
+    'instance_types': [
+        'm1.small',
+        'm1.large',
+        'm1.xlarge'
+    ]
+}
 
 """
 Sizes must be hardcoded, because Amazon doesn't provide an API to fetch them.
@@ -1870,70 +1885,6 @@ REGION_DETAILS = {
             'x1.16xlarge',
             'x1.32xlarge',
             'x1e.32xlarge',
-        ]
-    },
-    # EU (London) Region
-    'eu-west-2': {
-        'endpoint': 'ec2.eu-west-2.amazonaws.com',
-        'api_name': 'ec2_eu_west_london',
-        'country': 'United Kingdom',
-        'signature_version': '4',
-        'instance_types': [
-            't1.micro',
-            'm1.small',
-            'm1.medium',
-            'm1.large',
-            'm1.xlarge',
-            'm2.xlarge',
-            'm2.2xlarge',
-            'm2.4xlarge',
-            'm3.medium',
-            'm3.large',
-            'm3.xlarge',
-            'm3.2xlarge',
-            'm4.large',
-            'm4.xlarge',
-            'm4.2xlarge',
-            'm4.4xlarge',
-            'm4.10xlarge',
-            'm4.16xlarge',
-            'c1.medium',
-            'c1.xlarge',
-            'cc2.8xlarge',
-            'c3.large',
-            'c3.xlarge',
-            'c3.2xlarge',
-            'c3.4xlarge',
-            'c3.8xlarge',
-            'c4.large',
-            'c4.xlarge',
-            'c4.2xlarge',
-            'c4.4xlarge',
-            'c4.8xlarge',
-            'cg1.4xlarge',
-            'g2.2xlarge',
-            'g2.8xlarge',
-            'cr1.8xlarge',
-            'hs1.8xlarge',
-            'i2.xlarge',
-            'i2.2xlarge',
-            'i2.4xlarge',
-            'i2.8xlarge',
-            'd2.xlarge',
-            'd2.2xlarge',
-            'd2.4xlarge',
-            'd2.8xlarge',
-            'r3.large',
-            'r3.xlarge',
-            'r3.2xlarge',
-            'r3.4xlarge',
-            'r3.8xlarge',
-            't2.nano',
-            't2.micro',
-            't2.small',
-            't2.medium',
-            't2.large',
-            'x1.32xlarge'
         ]
     },
     # EU (Paris) Region
@@ -3868,10 +3819,11 @@ class EC2Response(AWSBaseResponse):
             raise InvalidCredsError(msg)
 
         try:
-            body = self.parse_body()
+            body = ET.XML(self.body)
         except:
             raise MalformedResponseError("Failed to parse XML",
                                          body=self.body, driver=EC2NodeDriver)
+
         for err in body.findall('Errors/Error'):
             code, message = err.getchildren()
             err_list.append('%s: %s' % (code.text, message.text))
@@ -3945,7 +3897,7 @@ class EC2ReservedNode(Node):
                                               driver=driver, extra=extra)
 
     def __repr__(self):
-        return '<EC2ReservedNode: id=%s>' % (self.id, )
+        return (('<EC2ReservedNode: id=%s>') % (self.id))
 
 
 class EC2ReservedInstancesOffering(object):
@@ -3972,7 +3924,7 @@ class EC2ReservedInstancesOffering(object):
         self.region = properties.get('region')
 
     def __repr__(self):
-        return '<EC2ReservedInstancesOffering: id=%s>' % (self.id, )
+        return (('<EC2ReservedInstancesOffering: id=%s>') % (self.id))
 
 
 class EC2SecurityGroup(object):
@@ -4807,6 +4759,7 @@ class BaseEC2NodeDriver(NodeDriver):
         :return: The newly created volume.
         :rtype: :class:`StorageVolume`
         """
+
         params = {
             'Action': 'CreateVolume',
             'Size': str(size)}
@@ -4879,7 +4832,7 @@ class BaseEC2NodeDriver(NodeDriver):
         response = self.connection.request(self.path, params=params).object
         return self._get_boolean(response)
 
-    def create_volume_snapshot(self, volume, name=None):
+    def create_volume_snapshot(self, volume, name=None, ex_metadata=None):
         """
         Create snapshot from volume
 
@@ -4888,6 +4841,10 @@ class BaseEC2NodeDriver(NodeDriver):
 
         :param      name: Name of snapshot (optional)
         :type       name: ``str``
+
+        :keyword    ex_metadata: The Key/Value metadata to associate
+                                 with a snapshot (optional)
+        :type       ex_metadata: ``dict``
 
         :rtype: :class:`VolumeSnapshot`
         """
@@ -4900,11 +4857,15 @@ class BaseEC2NodeDriver(NodeDriver):
             params.update({
                 'Description': name,
             })
+        if ex_metadata is None:
+            ex_metadata = {}
+
         response = self.connection.request(self.path, params=params).object
         snapshot = self._to_snapshot(response, name)
 
-        if name and self.ex_create_tags(snapshot, {'Name': name}):
-            snapshot.extra['tags']['Name'] = name
+        ex_metadata.update(**{'Name': name} if name else {})
+        if self.ex_create_tags(snapshot, ex_metadata):
+            snapshot.extra['tags'] = ex_metadata
 
         return snapshot
 
@@ -5920,7 +5881,7 @@ class BaseEC2NodeDriver(NodeDriver):
 
     def ex_authorize_security_group_ingress(self, id, from_port, to_port,
                                             cidr_ips=None, group_pairs=None,
-                                            protocol='tcp'):
+                                            protocol='tcp', description=None):
         """
         Edit a Security Group to allow specific ingress traffic using
         CIDR blocks or either a group ID, group name or user ID (account).
@@ -5954,6 +5915,9 @@ class BaseEC2NodeDriver(NodeDriver):
         :param      protocol: tcp/udp/icmp
         :type       protocol: ``str``
 
+        :param      description: description to be added to the rules inserted
+        :type       description: ``str``
+
         :rtype: ``bool``
         """
 
@@ -5962,7 +5926,8 @@ class BaseEC2NodeDriver(NodeDriver):
                                                         from_port,
                                                         to_port,
                                                         cidr_ips,
-                                                        group_pairs)
+                                                        group_pairs,
+                                                        description)
 
         params["Action"] = 'AuthorizeSecurityGroupIngress'
 
@@ -7556,6 +7521,7 @@ class BaseEC2NodeDriver(NodeDriver):
             kwargs['signature_version'] = '4'
         else:
             kwargs['signature_version'] = self.signature_version
+
         return kwargs
 
     def _to_nodes(self, object, xpath):
@@ -8523,7 +8489,7 @@ class BaseEC2NodeDriver(NodeDriver):
 
     def _get_common_security_group_params(self, group_id, protocol,
                                           from_port, to_port, cidr_ips,
-                                          group_pairs):
+                                          group_pairs, description=None):
         """
         Return a dictionary with common query parameters which are used when
         operating on security groups.
@@ -8542,6 +8508,9 @@ class BaseEC2NodeDriver(NodeDriver):
 
                 ip_ranges['IpPermissions.1.IpRanges.%s.CidrIp'
                           % (index)] = cidr_ip
+                if description is not None:
+                    ip_ranges['IpPermissions.1.IpRanges.%s.Description'
+                              % (index)] = description
 
             params.update(ip_ranges)
 
@@ -9382,7 +9351,6 @@ class EFSConnection(SignedAWSConnection):
 class EFSDriver(BaseDriver):
     """
     Implements Amazon Elastic File System API.
-
     https://docs.aws.amazon.com/efs/latest/ug/api-reference.html
     """
 
@@ -9400,17 +9368,14 @@ class EFSDriver(BaseDriver):
         """
         Returns the descriptions of all the current mount
         targets, or a specific mount target, for a file system.
-
         :param file_system_id: ID of the file system whose mount
             targets you want to list. It must be specified
             if ``mount_target_id`` is not specified. (optional)
         :type file_system_id: ``str``
-
         :param mount_target_id: ID of the mount target that you want
             to have described. It must be specified if ``file_system_id``
             is not specified. (optional)
         :type mount_target_id: ``str``
-
         :return: Returns the file system's mount targets as an array.
         :rtype: list[dict]
         """
