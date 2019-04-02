@@ -25,8 +25,6 @@ import os
 import six
 import time
 
-import six
-
 from libcloud.common.azure_arm import AzureResourceManagementConnection
 from libcloud.compute.providers import Provider
 from libcloud.compute.base import Node, NodeDriver, NodeLocation, NodeSize
@@ -45,6 +43,26 @@ from libcloud.utils import iso8601
 RESOURCE_API_VERSION = '2018-06-01'
 NIC_API_VERSION = '2016-09-01'
 CONSUMPTION_API_VERSION = '2018-06-30'
+
+
+class AzureImage(NodeImage):
+    """Represents a Marketplace node image that an Azure VM can boot from."""
+
+    def __init__(self, version, sku, offer, publisher, location, driver):
+        self.publisher = publisher
+        self.offer = offer
+        self.sku = sku
+        self.version = version
+        self.location = location
+        urn = "%s:%s:%s:%s" % (self.publisher, self.offer,
+                               self.sku, self.version)
+        name = "%s %s %s %s" % (self.publisher, self.offer,
+                                self.sku, self.version)
+        super(AzureImage, self).__init__(urn, name, driver)
+
+    def __repr__(self):
+        return (('<AzureImage: id=%s, name=%s, location=%s>')
+                % (self.id, self.name, self.location))
 
 
 class AzureVhdImage(NodeImage):
@@ -315,6 +333,69 @@ class AzureNodeDriver(NodeDriver):
 
         return image_paginator
 
+    def list_vm_images(self, location=None, ex_publisher=None, ex_offer=None,
+                       ex_sku=None, ex_version=None):
+        """
+        List available VM images to boot from.
+        :param location: The location at which to list images
+        (if None, use default location specified as 'region' in __init__)
+        :type location: :class:`.NodeLocation`
+        :param ex_publisher: Filter by publisher, or None to list
+        all publishers.
+        :type ex_publisher: ``str``
+        :param ex_offer: Filter by offer, or None to list all offers.
+        :type ex_offer: ``str``
+        :param ex_sku: Filter by sku, or None to list all skus.
+        :type ex_sku: ``str``
+        :param ex_version: Filter by version, or None to list all versions.
+        :type ex_version: ``str``
+        :return: list of node image objects.
+        :rtype: ``list`` of :class:`.AzureImage`
+        """
+
+        images = []
+
+        if location is None:
+            locations = [self.default_location]
+        else:
+            locations = [location]
+
+        for loc in locations:
+            if not ex_publisher:
+                publishers = self.ex_list_publishers(loc)
+            else:
+                publishers = [(
+                    "/subscriptions/%s/providers/Microsoft"
+                    ".Compute/locations/%s/publishers/%s" %
+                    (self.subscription_id, loc.id, ex_publisher),
+                    ex_publisher)]
+
+            for pub in publishers:
+                if not ex_offer:
+                    offers = self.ex_list_offers(pub[0])
+                else:
+                    offers = [("%s/artifacttypes/vmimage/offers/%s" % (
+                        pub[0], ex_offer), ex_offer)]
+
+                for off in offers:
+                    if not ex_sku:
+                        skus = self.ex_list_skus(off[0])
+                    else:
+                        skus = [("%s/skus/%s" % (off[0], ex_sku), ex_sku)]
+
+                    for sku in skus:
+                        if not ex_version:
+                            versions = self.ex_list_image_versions(sku[0])
+                        else:
+                            versions = [("%s/versions/%s" % (
+                                sku[0], ex_version), ex_version)]
+
+                        for v in versions:
+                            images.append(AzureImage(v[1], sku[1],
+                                                     off[1], pub[1],
+                                                     loc.id,
+                                                     self.connection.driver))
+        return images
 
     def get_image(self, image_id, location=None):
         """Returns a single node image from a provider.
@@ -338,8 +419,8 @@ class AzureNodeDriver(NodeDriver):
             return AzureVhdImage(storageAccount, blobContainer, blob, self)
         else:
             (ex_publisher, ex_offer, ex_sku, ex_version) = image_id.split(":")
-            i = self.list_images(location, ex_publisher,
-                                 ex_offer, ex_sku, ex_version)
+            i = self.list_vm_images(location, ex_publisher,
+                                    ex_offer, ex_sku, ex_version)
             return i[0] if i else None
 
     def list_nodes(self, *args, **kwargs):
