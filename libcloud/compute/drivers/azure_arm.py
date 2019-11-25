@@ -879,7 +879,7 @@ class AzureNodeDriver(NodeDriver):
 
     def create_volume(self, size, name, location=None, snapshot=None,
                       ex_sku_name=None, ex_resource_group=None,
-                      ex_tags=None):
+                      ex_tags=None, ex_zones=None):
         """
         Create a new managed volume.
 
@@ -905,6 +905,9 @@ class AzureNodeDriver(NodeDriver):
 
         :param ex_tags: Optional tags to associate with this resource.
         :type ex_tags: ``dict``
+        
+        :param ex_zones: Optional availability zone list for volume to be created in.
+        :type ex_zones: ``list``
 
         :return: The newly created volume.
         :rtype: :class:`StorageVolume`
@@ -942,6 +945,9 @@ class AzureNodeDriver(NodeDriver):
 
         if ex_sku_name is not None:
             data['sku'] = {'name': ex_sku_name}
+
+        if ex_zones is not None:
+            data['zones'] = ex_zones
 
         response = self.connection.request(
             action,
