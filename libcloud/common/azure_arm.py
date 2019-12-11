@@ -56,8 +56,7 @@ class AzureAuthJsonResponse(JsonResponse):
         else:
             return str(b)
 
-# Based on
-# https://github.com/Azure/azure-xplat-cli/blob/master/lib/util/profile/environment.js
+# Based on https://github.com/Azure/azure-cli/blob/master/src/azure-cli-core/azure/cli/core/cloud.py
 publicEnvironments = {
     "default": {
         'name': 'default',
@@ -104,7 +103,7 @@ publicEnvironments = {
     },
     "AzureUSGovernment": {
         'name': 'AzureUSGovernment',
-        'portalUrl': 'https://manage.windowsazure.us',
+        'portalUrl': 'https://portal.azure.us',
         'publishingProfileUrl':
             'https://manage.windowsazure.us/publishsettings/index',
         'managementEndpointUrl': 'https://management.core.usgovcloudapi.net',
@@ -113,7 +112,7 @@ publicEnvironments = {
             'https://management.core.usgovcloudapi.net:8443/',
         'sqlServerHostnameSuffix': '.database.usgovcloudapi.net',
         'galleryEndpointUrl': 'https://gallery.usgovcloudapi.net/',
-        'activeDirectoryEndpointUrl': 'https://login-us.microsoftonline.com',
+        'activeDirectoryEndpointUrl': 'https://login.microsoftonline.us',
         'activeDirectoryResourceId':
             'https://management.core.usgovcloudapi.net/',
         'activeDirectoryGraphResourceId': 'https://graph.windows.net/',
