@@ -43,6 +43,7 @@ from libcloud.utils import iso8601
 RESOURCE_API_VERSION = '2018-06-01'
 NIC_API_VERSION = '2016-09-01'
 CONSUMPTION_API_VERSION = '2018-06-30'
+VOLUME_ENCRYPTION_API_VERSION = '2020-06-30'
 
 
 class AzureImage(NodeImage):
@@ -879,7 +880,7 @@ class AzureNodeDriver(NodeDriver):
 
     def create_volume(self, size, name, location=None, snapshot=None,
                       ex_sku_name=None, ex_resource_group=None,
-                      ex_tags=None, ex_zones=None):
+                      ex_tags=None, ex_zones=None, ex_disk_encryption_set=None):
         """
         Create a new managed volume.
 
@@ -908,6 +909,10 @@ class AzureNodeDriver(NodeDriver):
         
         :param ex_zones: Optional availability zone list for volume to be created in.
         :type ex_zones: ``list``
+
+        :param ex_disk_encryption_set: Optional Disk encryption set to use for encryption
+            with customer-managed key.
+        :type ex_zones: ``str``
 
         :return: The newly created volume.
         :rtype: :class:`StorageVolume`
@@ -949,11 +954,18 @@ class AzureNodeDriver(NodeDriver):
         if ex_zones is not None:
             data['zones'] = ex_zones
 
+        # https://docs.microsoft.com/en-us/rest/api/compute/disks/createorupdate#encryptiontype
+        if ex_disk_encryption_set is not None:
+            data['properties']['encryption'] = {
+                'diskEncryptionSetId': ex_disk_encryption_set,
+                'type': 'EncryptionAtRestWithCustomerKey'
+            }
+
         response = self.connection.request(
             action,
             method='PUT',
             params={
-                'api-version': RESOURCE_API_VERSION,
+                'api-version': VOLUME_ENCRYPTION_API_VERSION,
             },
             data=data
         )
